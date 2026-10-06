@@ -7,13 +7,19 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import com.leonardo.ticketflow.user.entity.Role;
+import com.leonardo.ticketflow.user.entity.User;
+import com.leonardo.ticketflow.user.repository.UserRepository;
+
 @Testcontainers
 @SpringBootTest
-class DatabaseMigrationIntegrationTest {
+@Transactional
+class PersistenceIntegrationTest {
 
 	@Container
 	@ServiceConnection
@@ -21,6 +27,9 @@ class DatabaseMigrationIntegrationTest {
 
 	@Autowired
 	private JdbcClient jdbcClient;
+
+	@Autowired
+	private UserRepository userRepository;
 
 	@Test
 	void shouldApplyUserTableMigration() {
@@ -34,5 +43,24 @@ class DatabaseMigrationIntegrationTest {
 				.single();
 
 		assertThat(tableCount).isEqualTo(1);
+	}
+
+	@Test
+	void shouldPersistAndFindUserByEmailIgnoringCase() {
+		User user = new User(
+				"Leonardo",
+				"leonardo@example.com",
+				"encoded-password",
+				Role.USER);
+
+		User savedUser = userRepository.saveAndFlush(user);
+
+		assertThat(savedUser.getId()).isNotNull();
+		assertThat(savedUser.getCreatedAt()).isNotNull();
+		assertThat(userRepository.findByEmailIgnoreCase("LEONARDO@EXAMPLE.COM"))
+				.isPresent()
+				.get()
+				.extracting(User::getRole)
+				.isEqualTo(Role.USER);
 	}
 }
