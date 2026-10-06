@@ -32,6 +32,19 @@ The project is in its initial setup stage. Business features and infrastructure 
 Requirements:
 
 - Java 21
+- Docker and Docker Compose
+
+Start PostgreSQL:
+
+```powershell
+docker compose up -d postgres
+```
+
+The local database uses `ticketflow` as its database name, username, and password. The application provides matching development defaults. For another environment, use the `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` environment variables documented in `.env.example`.
+
+Flyway applies pending migrations automatically when the application starts. Hibernate is configured with `ddl-auto=validate`, so database changes must be introduced explicitly through migration files.
+
+Start the application:
 
 On Windows:
 
@@ -46,6 +59,8 @@ On Linux or macOS:
 ```
 
 ## Running the tests
+
+The integration test starts an isolated PostgreSQL container and verifies that the Flyway migrations were applied. Docker must be running.
 
 ```powershell
 .\mvnw.cmd test
