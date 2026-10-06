@@ -1,13 +1,12 @@
-package ticketflow;
+package com.leonardo.ticketflow;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class TicketflowApplication {
+public class TicketFlowApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(TicketflowApplication.class, args);
+		SpringApplication.run(TicketFlowApplication.class, args);
 	}
-
 }
