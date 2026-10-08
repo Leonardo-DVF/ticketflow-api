@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -15,12 +16,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.leonardo.ticketflow.auth.dto.UserRegistrationRequest;
 import com.leonardo.ticketflow.auth.dto.UserResponse;
 import com.leonardo.ticketflow.auth.service.UserRegistrationService;
+import com.leonardo.ticketflow.config.SecurityConfig;
 import com.leonardo.ticketflow.exception.GlobalExceptionHandler;
 import com.leonardo.ticketflow.user.entity.Role;
 import com.leonardo.ticketflow.user.exception.EmailAlreadyRegisteredException;
@@ -28,7 +31,7 @@ import com.leonardo.ticketflow.user.exception.EmailAlreadyRegisteredException;
 import tools.jackson.databind.ObjectMapper;
 
 @WebMvcTest(AuthController.class)
-@Import(GlobalExceptionHandler.class)
+@Import({ GlobalExceptionHandler.class, SecurityConfig.class })
 class AuthControllerTest {
 
 	@Autowired
@@ -39,6 +42,9 @@ class AuthControllerTest {
 
 	@MockitoBean
 	private UserRegistrationService registrationService;
+
+	@MockitoBean
+	private UserDetailsService userDetailsService;
 
 	@Test
 	void shouldRegisterUser() throws Exception {
@@ -102,5 +108,11 @@ class AuthControllerTest {
 				.andExpect(jsonPath("$.message")
 						.value("Email is already registered: leonardo@example.com"))
 				.andExpect(jsonPath("$.path").value("/auth/register"));
+	}
+
+	@Test
+	void shouldRequireAuthenticationForOtherRoutes() throws Exception {
+		mockMvc.perform(get("/protected-resource"))
+				.andExpect(status().isUnauthorized());
 	}
 }
