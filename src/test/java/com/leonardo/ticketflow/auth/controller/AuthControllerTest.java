@@ -16,12 +16,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.leonardo.ticketflow.auth.dto.LoginRequest;
 import com.leonardo.ticketflow.auth.dto.UserRegistrationRequest;
 import com.leonardo.ticketflow.auth.dto.UserResponse;
+import com.leonardo.ticketflow.auth.service.AuthenticationService;
 import com.leonardo.ticketflow.auth.service.UserRegistrationService;
 import com.leonardo.ticketflow.config.SecurityConfig;
 import com.leonardo.ticketflow.exception.GlobalExceptionHandler;
@@ -42,6 +45,9 @@ class AuthControllerTest {
 
 	@MockitoBean
 	private UserRegistrationService registrationService;
+
+	@MockitoBean
+	private AuthenticationService authenticationService;
 
 	@MockitoBean
 	private UserDetailsService userDetailsService;
@@ -114,5 +120,32 @@ class AuthControllerTest {
 	void shouldRequireAuthenticationForOtherRoutes() throws Exception {
 		mockMvc.perform(get("/protected-resource"))
 				.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void shouldAuthenticateValidCredentials() throws Exception {
+		LoginRequest request = new LoginRequest("leonardo@example.com", "plain-password");
+
+		mockMvc.perform(post("/auth/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(request)))
+				.andExpect(status().isNoContent());
+	}
+
+	@Test
+	void shouldReturnUnauthorizedForInvalidCredentials() throws Exception {
+		LoginRequest request = new LoginRequest("leonardo@example.com", "wrong-password");
+		org.mockito.Mockito.doThrow(new BadCredentialsException("Bad credentials"))
+				.when(authenticationService)
+				.authenticate(any(LoginRequest.class));
+
+		mockMvc.perform(post("/auth/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(request)))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Invalid email or password"))
+				.andExpect(jsonPath("$.path").value("/auth/login"));
 	}
 }

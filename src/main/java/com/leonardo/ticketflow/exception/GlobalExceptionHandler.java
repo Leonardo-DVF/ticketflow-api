@@ -5,6 +5,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -15,6 +16,16 @@ import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+	@ExceptionHandler(AuthenticationException.class)
+	public ResponseEntity<ApiError> handleAuthentication(
+			AuthenticationException exception,
+			HttpServletRequest request) {
+		return buildResponse(
+				HttpStatus.UNAUTHORIZED,
+				"Invalid email or password",
+				request.getRequestURI());
+	}
 
 	@ExceptionHandler(EmailAlreadyRegisteredException.class)
 	public ResponseEntity<ApiError> handleEmailAlreadyRegistered(
