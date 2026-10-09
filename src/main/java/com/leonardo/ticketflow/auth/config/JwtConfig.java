@@ -1,7 +1,6 @@
 package com.leonardo.ticketflow.auth.config;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -46,8 +45,4 @@ public class JwtConfig {
 		return decoder;
 	}
 
-	@Bean
-	Clock jwtClock() {
-		return Clock.systemUTC();
-	}
 }
