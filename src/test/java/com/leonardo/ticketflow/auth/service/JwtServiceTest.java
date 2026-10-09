@@ -40,7 +40,7 @@ class JwtServiceTest {
 		JwtDecoder decoder = NimbusJwtDecoder.withSecretKey(secretKey)
 				.macAlgorithm(MacAlgorithm.HS256)
 				.build();
-		JwtProperties properties = new JwtProperties(SECRET, 3600);
+		JwtProperties properties = new JwtProperties(SECRET, "https://ticketflow.local", 3600);
 		JwtService jwtService = new JwtService(encoder, properties, Clock.systemUTC());
 		Authentication authentication = UsernamePasswordAuthenticationToken.authenticated(
 				"leonardo@example.com",

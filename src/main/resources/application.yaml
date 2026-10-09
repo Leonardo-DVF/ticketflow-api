@@ -15,4 +15,5 @@ spring:
 security:
   jwt:
     secret: ${JWT_SECRET}
+    issuer: ${JWT_ISSUER:https://ticketflow.local}
     expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}

@@ -18,6 +18,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -52,6 +53,9 @@ class AuthControllerTest {
 
 	@MockitoBean
 	private UserDetailsService userDetailsService;
+
+	@MockitoBean
+	private JwtDecoder jwtDecoder;
 
 	@Test
 	void shouldRegisterUser() throws Exception {
@@ -120,7 +124,10 @@ class AuthControllerTest {
 	@Test
 	void shouldRequireAuthenticationForOtherRoutes() throws Exception {
 		mockMvc.perform(get("/protected-resource"))
-				.andExpect(status().isUnauthorized());
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.message").value("Authentication is required"))
+				.andExpect(jsonPath("$.path").value("/protected-resource"));
 	}
 
 	@Test

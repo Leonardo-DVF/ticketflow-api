@@ -19,7 +19,6 @@ public class JwtService {
 
 	private static final String TOKEN_TYPE = "Bearer";
 	private static final String ROLE_PREFIX = "ROLE_";
-	private static final String TOKEN_ISSUER = "https://ticketflow.local";
 
 	private final JwtEncoder jwtEncoder;
 	private final JwtProperties properties;
@@ -43,7 +42,7 @@ public class JwtService {
 				.orElseThrow(() -> new IllegalStateException("Authenticated user has no role"));
 
 		JwtClaimsSet claims = JwtClaimsSet.builder()
-				.issuer(TOKEN_ISSUER)
+				.issuer(properties.issuer())
 				.issuedAt(issuedAt)
 				.expiresAt(expiresAt)
 				.subject(authentication.getName())
