@@ -11,6 +11,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +27,7 @@ import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.exception.InvalidEventException;
 import com.leonardo.ticketflow.event.repository.EventRepository;
+import com.leonardo.ticketflow.exception.ResourceNotFoundException;
 
 @ExtendWith(MockitoExtension.class)
 class EventServiceTest {
@@ -93,5 +96,63 @@ class EventServiceTest {
 				.hasMessage("Event date must be in the future");
 
 		verify(eventRepository, never()).save(any(Event.class));
+	}
+
+	@Test
+	void shouldListOnlyAvailableEventsOrderedByDate() {
+		Event firstEvent = availableEvent(
+				1L,
+				"Coldplay - Brasilia",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"));
+		Event secondEvent = availableEvent(
+				2L,
+				"Coldplay - Sao Paulo",
+				OffsetDateTime.parse("2026-12-22T20:00:00-03:00"));
+		when(eventRepository.findAllByStatusOrderByEventDateAsc(EventStatus.AVAILABLE))
+				.thenReturn(List.of(firstEvent, secondEvent));
+
+		List<EventResponse> response = eventService.findAvailable();
+
+		assertThat(response).extracting(EventResponse::id).containsExactly(1L, 2L);
+		assertThat(response).extracting(EventResponse::status)
+				.containsOnly(EventStatus.AVAILABLE);
+	}
+
+	@Test
+	void shouldFindAvailableEventById() {
+		Event event = availableEvent(
+				1L,
+				"Coldplay - Brasilia",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"));
+		when(eventRepository.findByIdAndStatus(1L, EventStatus.AVAILABLE))
+				.thenReturn(Optional.of(event));
+
+		EventResponse response = eventService.findAvailableById(1L);
+
+		assertThat(response.id()).isEqualTo(1L);
+		assertThat(response.name()).isEqualTo("Coldplay - Brasilia");
+		assertThat(response.status()).isEqualTo(EventStatus.AVAILABLE);
+	}
+
+	@Test
+	void shouldRejectUnavailableOrUnknownEvent() {
+		when(eventRepository.findByIdAndStatus(99L, EventStatus.AVAILABLE))
+				.thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> eventService.findAvailableById(99L))
+				.isInstanceOf(ResourceNotFoundException.class)
+				.hasMessage("Event not found: 99");
+	}
+
+	private Event availableEvent(Long id, String name, OffsetDateTime eventDate) {
+		Event event = org.mockito.Mockito.mock(Event.class);
+		when(event.getId()).thenReturn(id);
+		when(event.getName()).thenReturn(name);
+		when(event.getDescription()).thenReturn("Live concert");
+		when(event.getLocation()).thenReturn("Brasilia");
+		when(event.getEventDate()).thenReturn(eventDate);
+		when(event.getStatus()).thenReturn(EventStatus.AVAILABLE);
+		when(event.getCreatedAt()).thenReturn(NOW);
+		return event;
 	}
 }

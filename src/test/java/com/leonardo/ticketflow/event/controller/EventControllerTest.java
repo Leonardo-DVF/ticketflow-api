@@ -4,12 +4,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +30,7 @@ import com.leonardo.ticketflow.event.dto.EventResponse;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.service.EventService;
 import com.leonardo.ticketflow.exception.GlobalExceptionHandler;
+import com.leonardo.ticketflow.exception.ResourceNotFoundException;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -120,11 +123,58 @@ class EventControllerTest {
 		verifyNoInteractions(eventService);
 	}
 
+	@Test
+	void shouldListAvailableEventsWithoutAuthentication() throws Exception {
+		EventResponse response = eventResponse();
+		when(eventService.findAvailable()).thenReturn(List.of(response));
+
+		mockMvc.perform(get("/events"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].id").value(1))
+				.andExpect(jsonPath("$[0].name").value("Coldplay - Brasilia"))
+				.andExpect(jsonPath("$[0].status").value("AVAILABLE"));
+	}
+
+	@Test
+	void shouldFindAvailableEventByIdWithoutAuthentication() throws Exception {
+		when(eventService.findAvailableById(1L)).thenReturn(eventResponse());
+
+		mockMvc.perform(get("/events/1"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(1))
+				.andExpect(jsonPath("$.name").value("Coldplay - Brasilia"))
+				.andExpect(jsonPath("$.status").value("AVAILABLE"));
+	}
+
+	@Test
+	void shouldReturnNotFoundForUnavailableOrUnknownEvent() throws Exception {
+		when(eventService.findAvailableById(99L))
+				.thenThrow(new ResourceNotFoundException("Event not found: 99"));
+
+		mockMvc.perform(get("/events/99"))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.status").value(404))
+				.andExpect(jsonPath("$.error").value("Not Found"))
+				.andExpect(jsonPath("$.message").value("Event not found: 99"))
+				.andExpect(jsonPath("$.path").value("/events/99"));
+	}
+
 	private CreateEventRequest validRequest() {
 		return new CreateEventRequest(
 				"Coldplay - Brasilia",
 				"Music of the Spheres Tour",
 				"Arena BRB Mane Garrincha",
 				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"));
+	}
+
+	private EventResponse eventResponse() {
+		return new EventResponse(
+				1L,
+				"Coldplay - Brasilia",
+				"Music of the Spheres Tour",
+				"Arena BRB Mane Garrincha",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"),
+				EventStatus.AVAILABLE,
+				Instant.parse("2026-10-09T18:00:00Z"));
 	}
 }
