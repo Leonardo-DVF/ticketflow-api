@@ -2,6 +2,8 @@ package com.leonardo.ticketflow;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.OffsetDateTime;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -15,6 +17,11 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import com.leonardo.ticketflow.user.entity.Role;
 import com.leonardo.ticketflow.user.entity.User;
 import com.leonardo.ticketflow.user.repository.UserRepository;
+import com.leonardo.ticketflow.event.entity.Event;
+import com.leonardo.ticketflow.event.entity.EventStatus;
+import com.leonardo.ticketflow.event.repository.EventRepository;
+
+import jakarta.persistence.EntityManager;
 
 @Testcontainers
 @SpringBootTest(properties =
@@ -31,6 +38,12 @@ class PersistenceIntegrationTest {
 
 	@Autowired
 	private UserRepository userRepository;
+
+	@Autowired
+	private EventRepository eventRepository;
+
+	@Autowired
+	private EntityManager entityManager;
 
 	@Test
 	void shouldApplyUserTableMigration() {
@@ -63,5 +76,28 @@ class PersistenceIntegrationTest {
 				.get()
 				.extracting(User::getRole)
 				.isEqualTo(Role.USER);
+	}
+
+	@Test
+	void shouldPersistDraftEvent() {
+		OffsetDateTime eventDate = OffsetDateTime.parse("2026-12-20T20:00:00-03:00");
+		Event event = new Event(
+				"Coldplay - Brasilia",
+				"Coldplay live in Brasilia",
+				"Arena BRB Mane Garrincha",
+				eventDate);
+
+		Event savedEvent = eventRepository.saveAndFlush(event);
+		Long eventId = savedEvent.getId();
+		entityManager.clear();
+
+		Event persistedEvent = eventRepository.findById(eventId).orElseThrow();
+
+		assertThat(persistedEvent.getName()).isEqualTo("Coldplay - Brasilia");
+		assertThat(persistedEvent.getDescription()).isEqualTo("Coldplay live in Brasilia");
+		assertThat(persistedEvent.getLocation()).isEqualTo("Arena BRB Mane Garrincha");
+		assertThat(persistedEvent.getEventDate()).isEqualTo(eventDate);
+		assertThat(persistedEvent.getStatus()).isEqualTo(EventStatus.DRAFT);
+		assertThat(persistedEvent.getCreatedAt()).isNotNull();
 	}
 }
