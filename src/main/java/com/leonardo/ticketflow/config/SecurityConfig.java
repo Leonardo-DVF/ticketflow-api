@@ -14,6 +14,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 
@@ -28,7 +29,8 @@ public class SecurityConfig {
 	SecurityFilterChain securityFilterChain(
 			HttpSecurity http,
 			JwtAuthenticationConverter jwtAuthenticationConverter,
-			AuthenticationEntryPoint authenticationEntryPoint) throws Exception {
+			AuthenticationEntryPoint authenticationEntryPoint,
+			AccessDeniedHandler accessDeniedHandler) throws Exception {
 		http
 				.csrf(AbstractHttpConfigurer::disable)
 				.formLogin(AbstractHttpConfigurer::disable)
@@ -36,13 +38,16 @@ public class SecurityConfig {
 				.sessionManagement(session -> session
 						.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.exceptionHandling(exceptions -> exceptions
-						.authenticationEntryPoint(authenticationEntryPoint))
+						.authenticationEntryPoint(authenticationEntryPoint)
+						.accessDeniedHandler(accessDeniedHandler))
 				.oauth2ResourceServer(oauth2 -> oauth2
 						.authenticationEntryPoint(authenticationEntryPoint)
 						.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
 				.authorizeHttpRequests(authorize -> authorize
 						.requestMatchers(HttpMethod.POST, "/auth/register").permitAll()
 						.requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
+						.requestMatchers(HttpMethod.GET, "/events", "/events/*").permitAll()
+						.requestMatchers(HttpMethod.POST, "/events").hasRole("ADMIN")
 						.requestMatchers("/error").permitAll()
 						.anyRequest().authenticated());
 
@@ -76,6 +81,22 @@ public class SecurityConfig {
 					request.getRequestURI());
 
 			response.setStatus(HttpStatus.UNAUTHORIZED.value());
+			response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+			objectMapper.writeValue(response.getOutputStream(), error);
+		};
+	}
+
+	@Bean
+	AccessDeniedHandler accessDeniedHandler(ObjectMapper objectMapper) {
+		return (request, response, exception) -> {
+			ApiError error = new ApiError(
+					Instant.now(),
+					HttpStatus.FORBIDDEN.value(),
+					HttpStatus.FORBIDDEN.getReasonPhrase(),
+					"Access denied",
+					request.getRequestURI());
+
+			response.setStatus(HttpStatus.FORBIDDEN.value());
 			response.setContentType(MediaType.APPLICATION_JSON_VALUE);
 			objectMapper.writeValue(response.getOutputStream(), error);
 		};
