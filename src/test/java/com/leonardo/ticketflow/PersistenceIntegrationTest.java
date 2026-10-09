@@ -17,7 +17,8 @@ import com.leonardo.ticketflow.user.entity.User;
 import com.leonardo.ticketflow.user.repository.UserRepository;
 
 @Testcontainers
-@SpringBootTest
+@SpringBootTest(properties =
+		"security.jwt.secret=ticketflow-integration-test-secret-key-32-bytes")
 @Transactional
 class PersistenceIntegrationTest {
 

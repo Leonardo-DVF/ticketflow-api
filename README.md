@@ -42,6 +42,12 @@ docker compose up -d postgres
 
 The local database uses `ticketflow` as its database name, username, and password. The application provides matching development defaults. For another environment, use the `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` environment variables documented in `.env.example`.
 
+Set a JWT signing secret containing at least 32 characters before starting the application:
+
+```powershell
+$env:JWT_SECRET = "replace-with-a-random-secret-containing-at-least-32-characters"
+```
+
 Flyway applies pending migrations automatically when the application starts. Hibernate is configured with `ddl-auto=validate`, so database changes must be introduced explicitly through migration files.
 
 Start the application:

@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.leonardo.ticketflow.auth.dto.UserRegistrationRequest;
 import com.leonardo.ticketflow.auth.dto.UserResponse;
+import com.leonardo.ticketflow.auth.dto.AccessTokenResponse;
 import com.leonardo.ticketflow.auth.dto.LoginRequest;
 import com.leonardo.ticketflow.auth.service.AuthenticationService;
 import com.leonardo.ticketflow.auth.service.UserRegistrationService;
@@ -36,8 +37,7 @@ public class AuthController {
 	}
 
 	@PostMapping("/login")
-	@ResponseStatus(HttpStatus.NO_CONTENT)
-	public void login(@Valid @RequestBody LoginRequest request) {
-		authenticationService.authenticate(request);
+	public AccessTokenResponse login(@Valid @RequestBody LoginRequest request) {
+		return authenticationService.authenticate(request);
 	}
 }

@@ -21,6 +21,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.leonardo.ticketflow.auth.dto.AccessTokenResponse;
 import com.leonardo.ticketflow.auth.dto.LoginRequest;
 import com.leonardo.ticketflow.auth.dto.UserRegistrationRequest;
 import com.leonardo.ticketflow.auth.dto.UserResponse;
@@ -125,11 +126,16 @@ class AuthControllerTest {
 	@Test
 	void shouldAuthenticateValidCredentials() throws Exception {
 		LoginRequest request = new LoginRequest("leonardo@example.com", "plain-password");
+		when(authenticationService.authenticate(any(LoginRequest.class)))
+				.thenReturn(new AccessTokenResponse("signed.jwt.token", "Bearer", 3600));
 
 		mockMvc.perform(post("/auth/login")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request)))
-				.andExpect(status().isNoContent());
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.token").value("signed.jwt.token"))
+				.andExpect(jsonPath("$.type").value("Bearer"))
+				.andExpect(jsonPath("$.expiresIn").value(3600));
 	}
 
 	@Test
