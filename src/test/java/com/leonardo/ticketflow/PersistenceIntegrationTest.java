@@ -1,25 +1,30 @@
 package com.leonardo.ticketflow;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-import com.leonardo.ticketflow.user.entity.Role;
-import com.leonardo.ticketflow.user.entity.User;
-import com.leonardo.ticketflow.user.repository.UserRepository;
 import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.repository.EventRepository;
+import com.leonardo.ticketflow.sector.entity.Sector;
+import com.leonardo.ticketflow.sector.repository.SectorRepository;
+import com.leonardo.ticketflow.user.entity.Role;
+import com.leonardo.ticketflow.user.entity.User;
+import com.leonardo.ticketflow.user.repository.UserRepository;
 
 import jakarta.persistence.EntityManager;
 
@@ -41,6 +46,9 @@ class PersistenceIntegrationTest {
 
 	@Autowired
 	private EventRepository eventRepository;
+
+	@Autowired
+	private SectorRepository sectorRepository;
 
 	@Autowired
 	private EntityManager entityManager;
@@ -99,5 +107,55 @@ class PersistenceIntegrationTest {
 		assertThat(persistedEvent.getEventDate()).isEqualTo(eventDate);
 		assertThat(persistedEvent.getStatus()).isEqualTo(EventStatus.DRAFT);
 		assertThat(persistedEvent.getCreatedAt()).isNotNull();
+	}
+
+	@Test
+	void shouldApplySectorTableMigration() {
+		Integer tableCount = jdbcClient.sql("""
+				SELECT COUNT(*)
+				FROM information_schema.tables
+				WHERE table_schema = 'public'
+				  AND table_name = 'sectors'
+				""")
+				.query(Integer.class)
+				.single();
+
+		assertThat(tableCount).isEqualTo(1);
+	}
+
+	@Test
+	void shouldPersistSectorRelatedToEvent() {
+		Event event = eventRepository.saveAndFlush(new Event(
+				"Coldplay - Brasilia",
+				null,
+				"Arena BRB Mane Garrincha",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00")));
+		Sector sector = sectorRepository.saveAndFlush(
+				new Sector(event, "VIP", new BigDecimal("250.00")));
+		Long sectorId = sector.getId();
+		entityManager.clear();
+
+		Sector persistedSector = sectorRepository.findById(sectorId).orElseThrow();
+
+		assertThat(persistedSector.getName()).isEqualTo("VIP");
+		assertThat(persistedSector.getPrice()).isEqualByComparingTo("250.00");
+		assertThat(persistedSector.getEvent().getId()).isEqualTo(event.getId());
+		assertThat(sectorRepository.findAllByEventIdOrderByNameAsc(event.getId()))
+				.extracting(Sector::getName)
+				.containsExactly("VIP");
+	}
+
+	@Test
+	void shouldRejectDuplicateSectorNameIgnoringCaseWithinSameEvent() {
+		Event event = eventRepository.saveAndFlush(new Event(
+				"Coldplay - Brasilia",
+				null,
+				"Arena BRB Mane Garrincha",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00")));
+		sectorRepository.saveAndFlush(new Sector(event, "VIP", new BigDecimal("250.00")));
+
+		assertThatThrownBy(() -> sectorRepository.saveAndFlush(
+				new Sector(event, "vip", new BigDecimal("300.00"))))
+				.isInstanceOf(DataIntegrityViolationException.class);
 	}
 }
