@@ -1,11 +1,15 @@
 package com.leonardo.ticketflow.event.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -27,6 +31,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.leonardo.ticketflow.config.SecurityConfig;
 import com.leonardo.ticketflow.event.dto.CreateEventRequest;
 import com.leonardo.ticketflow.event.dto.EventResponse;
+import com.leonardo.ticketflow.event.dto.UpdateEventRequest;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.service.EventService;
 import com.leonardo.ticketflow.exception.GlobalExceptionHandler;
@@ -159,6 +164,52 @@ class EventControllerTest {
 				.andExpect(jsonPath("$.path").value("/events/99"));
 	}
 
+	@Test
+	void shouldAllowAdminToUpdateAndPublishEvent() throws Exception {
+		UpdateEventRequest request = updateRequest();
+		when(eventService.update(eq(1L), any(UpdateEventRequest.class)))
+				.thenReturn(eventResponse());
+
+		mockMvc.perform(put("/events/1")
+				.with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN")))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(request)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(1))
+				.andExpect(jsonPath("$.status").value("AVAILABLE"));
+	}
+
+	@Test
+	void shouldForbidRegularUserFromUpdatingEvent() throws Exception {
+		mockMvc.perform(put("/events/1")
+				.with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER")))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(objectMapper.writeValueAsString(updateRequest())))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.message").value("Access denied"));
+
+		verifyNoInteractions(eventService);
+	}
+
+	@Test
+	void shouldAllowAdminToCancelEvent() throws Exception {
+		mockMvc.perform(delete("/events/1")
+				.with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+				.andExpect(status().isNoContent());
+
+		verify(eventService).cancel(1L);
+	}
+
+	@Test
+	void shouldForbidRegularUserFromCancellingEvent() throws Exception {
+		mockMvc.perform(delete("/events/1")
+				.with(jwt().authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.message").value("Access denied"));
+
+		verifyNoInteractions(eventService);
+	}
+
 	private CreateEventRequest validRequest() {
 		return new CreateEventRequest(
 				"Coldplay - Brasilia",
@@ -176,5 +227,14 @@ class EventControllerTest {
 				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"),
 				EventStatus.AVAILABLE,
 				Instant.parse("2026-10-09T18:00:00Z"));
+	}
+
+	private UpdateEventRequest updateRequest() {
+		return new UpdateEventRequest(
+				"Coldplay - Brasilia",
+				"Music of the Spheres Tour",
+				"Arena BRB Mane Garrincha",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"),
+				EventStatus.AVAILABLE);
 	}
 }

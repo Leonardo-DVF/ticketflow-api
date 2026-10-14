@@ -23,6 +23,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.leonardo.ticketflow.event.dto.CreateEventRequest;
 import com.leonardo.ticketflow.event.dto.EventResponse;
+import com.leonardo.ticketflow.event.dto.UpdateEventRequest;
 import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.exception.InvalidEventException;
@@ -142,6 +143,81 @@ class EventServiceTest {
 		assertThatThrownBy(() -> eventService.findAvailableById(99L))
 				.isInstanceOf(ResourceNotFoundException.class)
 				.hasMessage("Event not found: 99");
+	}
+
+	@Test
+	void shouldUpdateAndPublishDraftEvent() {
+		Event event = new Event(
+				"Original name",
+				"Original description",
+				"Original location",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"));
+		UpdateEventRequest request = new UpdateEventRequest(
+				"  Coldplay - Brasilia  ",
+				"  Updated concert  ",
+				"  Arena BRB Mane Garrincha  ",
+				OffsetDateTime.parse("2026-12-21T20:00:00-03:00"),
+				EventStatus.AVAILABLE);
+		when(eventRepository.findById(1L)).thenReturn(Optional.of(event));
+
+		EventResponse response = eventService.update(1L, request);
+
+		assertThat(event.getName()).isEqualTo("Coldplay - Brasilia");
+		assertThat(event.getDescription()).isEqualTo("Updated concert");
+		assertThat(event.getLocation()).isEqualTo("Arena BRB Mane Garrincha");
+		assertThat(event.getEventDate()).isEqualTo(request.eventDate());
+		assertThat(response.status()).isEqualTo(EventStatus.AVAILABLE);
+	}
+
+	@Test
+	void shouldNotReturnPublishedEventToDraft() {
+		Event event = new Event(
+				"Coldplay - Brasilia",
+				null,
+				"Brasilia",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"));
+		event.changeStatus(EventStatus.AVAILABLE);
+		when(eventRepository.findById(1L)).thenReturn(Optional.of(event));
+		UpdateEventRequest request = new UpdateEventRequest(
+				"Coldplay - Brasilia",
+				null,
+				"Brasilia",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"),
+				EventStatus.DRAFT);
+
+		assertThatThrownBy(() -> eventService.update(1L, request))
+				.isInstanceOf(InvalidEventException.class)
+				.hasMessage("Published event cannot return to draft");
+	}
+
+	@Test
+	void shouldCancelEventWithoutDeletingIt() {
+		Event event = new Event(
+				"Coldplay - Brasilia",
+				null,
+				"Brasilia",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"));
+		when(eventRepository.findById(1L)).thenReturn(Optional.of(event));
+
+		eventService.cancel(1L);
+
+		assertThat(event.getStatus()).isEqualTo(EventStatus.CANCELLED);
+		verify(eventRepository, never()).delete(any(Event.class));
+	}
+
+	@Test
+	void shouldNotCancelFinishedEvent() {
+		Event event = new Event(
+				"Past event",
+				null,
+				"Brasilia",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"));
+		event.changeStatus(EventStatus.FINISHED);
+		when(eventRepository.findById(1L)).thenReturn(Optional.of(event));
+
+		assertThatThrownBy(() -> eventService.cancel(1L))
+				.isInstanceOf(InvalidEventException.class)
+				.hasMessage("Finished event cannot be cancelled");
 	}
 
 	private Event availableEvent(Long id, String name, OffsetDateTime eventDate) {

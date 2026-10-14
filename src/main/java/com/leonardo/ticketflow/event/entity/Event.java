@@ -51,6 +51,17 @@ public class Event {
 		this.status = EventStatus.DRAFT;
 	}
 
+	public void update(String name, String description, String location, OffsetDateTime eventDate) {
+		this.name = name;
+		this.description = description;
+		this.location = location;
+		this.eventDate = eventDate;
+	}
+
+	public void changeStatus(EventStatus status) {
+		this.status = status;
+	}
+
 	@PrePersist
 	void assignCreationTime() {
 		if (createdAt == null) {
