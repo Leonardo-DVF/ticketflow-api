@@ -48,6 +48,8 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
 						.requestMatchers(HttpMethod.GET, "/events", "/events/*").permitAll()
 						.requestMatchers(HttpMethod.POST, "/events").hasRole("ADMIN")
+						.requestMatchers(HttpMethod.POST, "/events/*/sectors").hasRole("ADMIN")
+						.requestMatchers(HttpMethod.GET, "/events/*/sectors").hasRole("ADMIN")
 						.requestMatchers(HttpMethod.PUT, "/events/*").hasRole("ADMIN")
 						.requestMatchers(HttpMethod.DELETE, "/events/*").hasRole("ADMIN")
 						.requestMatchers("/error").permitAll()
