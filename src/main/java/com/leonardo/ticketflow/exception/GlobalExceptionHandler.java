@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.leonardo.ticketflow.event.exception.InvalidEventException;
+import com.leonardo.ticketflow.seat.exception.InvalidSeatException;
+import com.leonardo.ticketflow.seat.exception.SeatAlreadyExistsException;
 import com.leonardo.ticketflow.sector.exception.InvalidSectorException;
 import com.leonardo.ticketflow.sector.exception.SectorAlreadyExistsException;
 import com.leonardo.ticketflow.user.exception.EmailAlreadyRegisteredException;
@@ -44,6 +46,13 @@ public class GlobalExceptionHandler {
 		return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request.getRequestURI());
 	}
 
+	@ExceptionHandler(SeatAlreadyExistsException.class)
+	public ResponseEntity<ApiError> handleSeatAlreadyExists(
+			SeatAlreadyExistsException exception,
+			HttpServletRequest request) {
+		return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request.getRequestURI());
+	}
+
 	@ExceptionHandler(InvalidEventException.class)
 	public ResponseEntity<ApiError> handleInvalidEvent(
 			InvalidEventException exception,
@@ -54,6 +63,13 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(InvalidSectorException.class)
 	public ResponseEntity<ApiError> handleInvalidSector(
 			InvalidSectorException exception,
+			HttpServletRequest request) {
+		return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request.getRequestURI());
+	}
+
+	@ExceptionHandler(InvalidSeatException.class)
+	public ResponseEntity<ApiError> handleInvalidSeat(
+			InvalidSeatException exception,
 			HttpServletRequest request) {
 		return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request.getRequestURI());
 	}

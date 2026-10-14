@@ -11,6 +11,8 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
 	List<Seat> findAllBySectorIdOrderByCodeAsc(Long sectorId);
 
+	List<Seat> findAllBySectorEventIdOrderBySectorNameAscCodeAsc(Long eventId);
+
 	List<Seat> findAllBySectorEventIdAndStatusOrderBySectorNameAscCodeAsc(
 			Long eventId,
 			SeatStatus status);
