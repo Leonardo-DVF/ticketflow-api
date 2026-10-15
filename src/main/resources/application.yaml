@@ -17,3 +17,7 @@ security:
     secret: ${JWT_SECRET}
     issuer: ${JWT_ISSUER:https://ticketflow.local}
     expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
+
+ticketflow:
+  reservation:
+    expiration-interval-ms: ${RESERVATION_EXPIRATION_INTERVAL_MS:60000}

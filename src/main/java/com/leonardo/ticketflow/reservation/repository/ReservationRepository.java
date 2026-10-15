@@ -38,4 +38,16 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
 	List<Reservation> findAllByStatusAndExpiresAtBefore(
 			ReservationStatus status,
 			Instant expiresAt);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("""
+			SELECT reservation
+			FROM Reservation reservation
+			WHERE reservation.status = :status
+			AND reservation.expiresAt <= :now
+			ORDER BY reservation.id
+			""")
+	List<Reservation> findAllDueWithLock(
+			@Param("status") ReservationStatus status,
+			@Param("now") Instant now);
 }

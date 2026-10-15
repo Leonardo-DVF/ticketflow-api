@@ -66,6 +66,13 @@ public class Reservation {
 		status = ReservationStatus.CANCELLED;
 	}
 
+	public void expire() {
+		if (status != ReservationStatus.PENDING) {
+			throw new IllegalStateException("Only pending reservations can expire");
+		}
+		status = ReservationStatus.EXPIRED;
+	}
+
 	@PrePersist
 	void assignInitialValues() {
 		if (status == null) {

@@ -3,19 +3,28 @@ package com.leonardo.ticketflow.reservation;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -30,6 +39,7 @@ import com.leonardo.ticketflow.reservation.exception.SeatUnavailableException;
 import com.leonardo.ticketflow.reservation.repository.ReservationRepository;
 import com.leonardo.ticketflow.reservation.repository.ReservationItemRepository;
 import com.leonardo.ticketflow.reservation.service.ReservationService;
+import com.leonardo.ticketflow.reservation.service.ReservationExpirationService;
 import com.leonardo.ticketflow.seat.entity.Seat;
 import com.leonardo.ticketflow.seat.entity.SeatStatus;
 import com.leonardo.ticketflow.seat.repository.SeatRepository;
@@ -42,7 +52,10 @@ import com.leonardo.ticketflow.user.repository.UserRepository;
 @Testcontainers
 @SpringBootTest(properties =
 		"security.jwt.secret=ticketflow-concurrency-test-secret-key-32-bytes")
+@Import(ReservationConcurrencyIntegrationTest.TestClockConfig.class)
 class ReservationConcurrencyIntegrationTest {
+
+	private static final Instant TEST_NOW = Instant.parse("2030-01-01T12:00:00Z");
 
 	@Container
 	@ServiceConnection
@@ -69,14 +82,52 @@ class ReservationConcurrencyIntegrationTest {
 	@Autowired
 	private ReservationService reservationService;
 
+	@Autowired
+	private ReservationExpirationService expirationService;
+
+	@Autowired
+	private MutableClock clock;
+
 	@BeforeEach
 	void cleanDatabase() {
+		clock.setInstant(TEST_NOW);
 		reservationItemRepository.deleteAll();
 		reservationRepository.deleteAll();
 		seatRepository.deleteAll();
 		sectorRepository.deleteAll();
 		eventRepository.deleteAll();
 		userRepository.deleteAll();
+	}
+
+	@Test
+	void shouldExpireReservationAndReleaseSeatAfterTenMinutes() {
+		User user = userRepository.saveAndFlush(new User(
+				"Expiration User",
+				"expiration@example.com",
+				"encoded-password",
+				Role.USER));
+		Event event = new Event(
+				"Muse - Rio de Janeiro",
+				null,
+				"Engenhao",
+				OffsetDateTime.parse("2030-02-10T20:00:00-03:00"));
+		event.changeStatus(EventStatus.AVAILABLE);
+		eventRepository.saveAndFlush(event);
+		Sector sector = sectorRepository.saveAndFlush(
+				new Sector(event, "Arquibancada", new BigDecimal("150.00")));
+		Seat seat = seatRepository.saveAndFlush(new Seat(sector, "B1"));
+		var reservation = reservationService.create(
+				user.getEmail(),
+				new CreateReservationRequest(event.getId(), List.of(seat.getId())));
+		clock.setInstant(TEST_NOW.plusSeconds(11 * 60));
+
+		int expiredCount = expirationService.expireDueReservations();
+
+		assertThat(expiredCount).isEqualTo(1);
+		assertThat(reservationRepository.findById(reservation.id()).orElseThrow().getStatus())
+				.isEqualTo(ReservationStatus.EXPIRED);
+		assertThat(seatRepository.findById(seat.getId()).orElseThrow().getStatus())
+				.isEqualTo(SeatStatus.AVAILABLE);
 	}
 
 	@Test
@@ -186,5 +237,43 @@ class ReservationConcurrencyIntegrationTest {
 	}
 
 	private record Attempt(boolean success, Throwable error) {
+	}
+
+	@TestConfiguration(proxyBeanMethods = false)
+	static class TestClockConfig {
+
+		@Bean
+		@Primary
+		MutableClock testClock() {
+			return new MutableClock(TEST_NOW);
+		}
+	}
+
+	static class MutableClock extends Clock {
+
+		private final AtomicReference<Instant> instant;
+
+		MutableClock(Instant initialInstant) {
+			this.instant = new AtomicReference<>(initialInstant);
+		}
+
+		void setInstant(Instant newInstant) {
+			instant.set(newInstant);
+		}
+
+		@Override
+		public ZoneId getZone() {
+			return ZoneOffset.UTC;
+		}
+
+		@Override
+		public Clock withZone(ZoneId zone) {
+			return Clock.fixed(instant(), zone);
+		}
+
+		@Override
+		public Instant instant() {
+			return instant.get();
+		}
 	}
 }
