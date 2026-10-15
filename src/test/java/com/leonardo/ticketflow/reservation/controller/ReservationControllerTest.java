@@ -3,7 +3,11 @@ package com.leonardo.ticketflow.reservation.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -30,6 +34,7 @@ import com.leonardo.ticketflow.reservation.dto.ReservationItemResponse;
 import com.leonardo.ticketflow.reservation.dto.ReservationResponse;
 import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
 import com.leonardo.ticketflow.reservation.exception.SeatUnavailableException;
+import com.leonardo.ticketflow.reservation.exception.ReservationNotCancellableException;
 import com.leonardo.ticketflow.reservation.service.ReservationService;
 
 import tools.jackson.databind.ObjectMapper;
@@ -112,6 +117,52 @@ class ReservationControllerTest {
 				.content(objectMapper.writeValueAsString(request)))
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.message").value("Seat is not available: A1"));
+	}
+
+	@Test
+	void shouldFindAuthenticatedUserReservation() throws Exception {
+		when(reservationService.findById("leonardo@example.com", 50L))
+				.thenReturn(response());
+
+		mockMvc.perform(get("/reservations/50")
+				.with(jwt().jwt(jwt -> jwt.subject("leonardo@example.com"))))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(50))
+				.andExpect(jsonPath("$.items[0].seatCode").value("A1"));
+	}
+
+	@Test
+	void shouldListAuthenticatedUserReservations() throws Exception {
+		when(reservationService.findMine("leonardo@example.com"))
+				.thenReturn(List.of(response()));
+
+		mockMvc.perform(get("/reservations/my")
+				.with(jwt().jwt(jwt -> jwt.subject("leonardo@example.com"))))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].id").value(50));
+	}
+
+	@Test
+	void shouldCancelAuthenticatedUserReservation() throws Exception {
+		mockMvc.perform(delete("/reservations/50")
+				.with(jwt().jwt(jwt -> jwt.subject("leonardo@example.com"))))
+				.andExpect(status().isNoContent());
+
+		verify(reservationService).cancel("leonardo@example.com", 50L);
+	}
+
+	@Test
+	void shouldReturnConflictWhenReservationCannotBeCancelled() throws Exception {
+		doThrow(new ReservationNotCancellableException(
+				"Only pending reservations can be cancelled"))
+				.when(reservationService)
+				.cancel("leonardo@example.com", 50L);
+
+		mockMvc.perform(delete("/reservations/50")
+				.with(jwt().jwt(jwt -> jwt.subject("leonardo@example.com"))))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.message")
+						.value("Only pending reservations can be cancelled"));
 	}
 
 	private ReservationResponse response() {

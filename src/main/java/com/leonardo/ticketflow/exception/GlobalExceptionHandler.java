@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.leonardo.ticketflow.event.exception.InvalidEventException;
 import com.leonardo.ticketflow.reservation.exception.InvalidReservationException;
+import com.leonardo.ticketflow.reservation.exception.ReservationNotCancellableException;
 import com.leonardo.ticketflow.reservation.exception.SeatUnavailableException;
 import com.leonardo.ticketflow.seat.exception.InvalidSeatException;
 import com.leonardo.ticketflow.seat.exception.SeatAlreadyExistsException;
@@ -58,6 +59,13 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(SeatUnavailableException.class)
 	public ResponseEntity<ApiError> handleSeatUnavailable(
 			SeatUnavailableException exception,
+			HttpServletRequest request) {
+		return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request.getRequestURI());
+	}
+
+	@ExceptionHandler(ReservationNotCancellableException.class)
+	public ResponseEntity<ApiError> handleReservationNotCancellable(
+			ReservationNotCancellableException exception,
 			HttpServletRequest request) {
 		return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request.getRequestURI());
 	}

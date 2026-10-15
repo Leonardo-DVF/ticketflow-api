@@ -20,7 +20,9 @@ import com.leonardo.ticketflow.reservation.dto.ReservationItemResponse;
 import com.leonardo.ticketflow.reservation.dto.ReservationResponse;
 import com.leonardo.ticketflow.reservation.entity.Reservation;
 import com.leonardo.ticketflow.reservation.entity.ReservationItem;
+import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
 import com.leonardo.ticketflow.reservation.exception.InvalidReservationException;
+import com.leonardo.ticketflow.reservation.exception.ReservationNotCancellableException;
 import com.leonardo.ticketflow.reservation.exception.SeatUnavailableException;
 import com.leonardo.ticketflow.reservation.repository.ReservationItemRepository;
 import com.leonardo.ticketflow.reservation.repository.ReservationRepository;
@@ -86,6 +88,53 @@ public class ReservationService {
 		reservationItemRepository.saveAll(items);
 
 		return toResponse(reservation, items);
+	}
+
+	@Transactional(readOnly = true)
+	public ReservationResponse findById(String userEmail, Long reservationId) {
+		Reservation reservation = reservationRepository
+				.findByIdAndUserEmailIgnoreCase(reservationId, userEmail)
+				.orElseThrow(() -> reservationNotFound(reservationId));
+		List<ReservationItem> items = reservationItemRepository
+				.findAllByReservationIdOrderById(reservationId);
+		return toResponse(reservation, items);
+	}
+
+	@Transactional(readOnly = true)
+	public List<ReservationResponse> findMine(String userEmail) {
+		return reservationRepository
+				.findAllByUserEmailIgnoreCaseOrderByCreatedAtDesc(userEmail)
+				.stream()
+				.map(reservation -> toResponse(
+						reservation,
+						reservationItemRepository.findAllByReservationIdOrderById(
+								reservation.getId())))
+				.toList();
+	}
+
+	@Transactional
+	public void cancel(String userEmail, Long reservationId) {
+		Reservation reservation = reservationRepository
+				.findOwnedByIdWithLock(reservationId, userEmail)
+				.orElseThrow(() -> reservationNotFound(reservationId));
+		if (reservation.getStatus() != ReservationStatus.PENDING) {
+			throw new ReservationNotCancellableException(
+					"Only pending reservations can be cancelled");
+		}
+
+		List<ReservationItem> items = reservationItemRepository
+				.findAllByReservationIdOrderById(reservationId);
+		List<Long> seatIds = items.stream()
+				.map(item -> item.getSeat().getId())
+				.sorted()
+				.toList();
+		List<Seat> seats = seatRepository.findAllByIdWithLock(seatIds);
+		seats.forEach(Seat::release);
+		reservation.cancel();
+	}
+
+	private ResourceNotFoundException reservationNotFound(Long reservationId) {
+		return new ResourceNotFoundException("Reservation not found: " + reservationId);
 	}
 
 	private List<Long> validateAndSortSeatIds(List<Long> seatIds) {

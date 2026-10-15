@@ -59,6 +59,13 @@ public class Reservation {
 		this.status = ReservationStatus.PENDING;
 	}
 
+	public void cancel() {
+		if (status != ReservationStatus.PENDING) {
+			throw new IllegalStateException("Only pending reservations can be cancelled");
+		}
+		status = ReservationStatus.CANCELLED;
+	}
+
 	@PrePersist
 	void assignInitialValues() {
 		if (status == null) {

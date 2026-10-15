@@ -9,4 +9,6 @@ import com.leonardo.ticketflow.reservation.entity.ReservationItem;
 public interface ReservationItemRepository extends JpaRepository<ReservationItem, Long> {
 
 	List<ReservationItem> findAllByReservationId(Long reservationId);
+
+	List<ReservationItem> findAllByReservationIdOrderById(Long reservationId);
 }

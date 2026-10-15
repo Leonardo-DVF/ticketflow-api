@@ -28,7 +28,9 @@ import com.leonardo.ticketflow.reservation.dto.CreateReservationRequest;
 import com.leonardo.ticketflow.reservation.dto.ReservationResponse;
 import com.leonardo.ticketflow.reservation.entity.Reservation;
 import com.leonardo.ticketflow.reservation.entity.ReservationItem;
+import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
 import com.leonardo.ticketflow.reservation.exception.InvalidReservationException;
+import com.leonardo.ticketflow.reservation.exception.ReservationNotCancellableException;
 import com.leonardo.ticketflow.reservation.exception.SeatUnavailableException;
 import com.leonardo.ticketflow.reservation.repository.ReservationItemRepository;
 import com.leonardo.ticketflow.reservation.repository.ReservationRepository;
@@ -163,6 +165,110 @@ class ReservationServiceTest {
 				seatRepository,
 				reservationRepository,
 				reservationItemRepository);
+	}
+
+	@Test
+	void shouldFindOwnedReservationById() {
+		User user = user(1L, "leonardo@example.com");
+		Event event = event(10L);
+		Seat seat = seat(100L, "A1", event, new BigDecimal("250.00"));
+		Reservation reservation = reservation(50L, user, event);
+		ReservationItem item = new ReservationItem(
+				reservation,
+				seat,
+				new BigDecimal("250.00"));
+		when(reservationRepository.findByIdAndUserEmailIgnoreCase(
+				50L,
+				"leonardo@example.com"))
+				.thenReturn(Optional.of(reservation));
+		when(reservationItemRepository.findAllByReservationIdOrderById(50L))
+				.thenReturn(List.of(item));
+
+		ReservationResponse response = reservationService.findById(
+				"leonardo@example.com",
+				50L);
+
+		assertThat(response.id()).isEqualTo(50L);
+		assertThat(response.items()).extracting(itemResponse -> itemResponse.seatCode())
+				.containsExactly("A1");
+	}
+
+	@Test
+	void shouldListOnlyAuthenticatedUserReservations() {
+		User user = user(1L, "leonardo@example.com");
+		Event event = event(10L);
+		Reservation newer = reservation(51L, user, event);
+		Reservation older = reservation(50L, user, event);
+		when(reservationRepository.findAllByUserEmailIgnoreCaseOrderByCreatedAtDesc(
+				"leonardo@example.com"))
+				.thenReturn(List.of(newer, older));
+		when(reservationItemRepository.findAllByReservationIdOrderById(51L))
+				.thenReturn(List.of());
+		when(reservationItemRepository.findAllByReservationIdOrderById(50L))
+				.thenReturn(List.of());
+
+		List<ReservationResponse> responses = reservationService.findMine(
+				"leonardo@example.com");
+
+		assertThat(responses).extracting(ReservationResponse::id)
+				.containsExactly(51L, 50L);
+	}
+
+	@Test
+	void shouldCancelPendingReservationAndReleaseSeats() {
+		User user = user(1L, "leonardo@example.com");
+		Event event = event(10L);
+		Seat seat = seat(100L, "A1", event, new BigDecimal("250.00"));
+		seat.reserve();
+		Reservation reservation = reservation(50L, user, event);
+		ReservationItem item = new ReservationItem(
+				reservation,
+				seat,
+				new BigDecimal("250.00"));
+		when(reservationRepository.findOwnedByIdWithLock(
+				50L,
+				"leonardo@example.com"))
+				.thenReturn(Optional.of(reservation));
+		when(reservationItemRepository.findAllByReservationIdOrderById(50L))
+				.thenReturn(List.of(item));
+		when(seatRepository.findAllByIdWithLock(List.of(100L)))
+				.thenReturn(List.of(seat));
+
+		reservationService.cancel("leonardo@example.com", 50L);
+
+		assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+		assertThat(seat.getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+	}
+
+	@Test
+	void shouldRejectCancellationWhenReservationIsNotPending() {
+		User user = user(1L, "leonardo@example.com");
+		Event event = event(10L);
+		Reservation reservation = reservation(50L, user, event);
+		ReflectionTestUtils.setField(reservation, "status", ReservationStatus.CONFIRMED);
+		when(reservationRepository.findOwnedByIdWithLock(
+				50L,
+				"leonardo@example.com"))
+				.thenReturn(Optional.of(reservation));
+
+		assertThatThrownBy(() -> reservationService.cancel(
+				"leonardo@example.com",
+				50L))
+				.isInstanceOf(ReservationNotCancellableException.class)
+				.hasMessage("Only pending reservations can be cancelled");
+
+		verifyNoInteractions(seatRepository);
+	}
+
+	private Reservation reservation(Long id, User user, Event event) {
+		Reservation reservation = new Reservation(
+				user,
+				event,
+				NOW.plusSeconds(600),
+				new BigDecimal("250.00"));
+		ReflectionTestUtils.setField(reservation, "id", id);
+		ReflectionTestUtils.setField(reservation, "createdAt", NOW);
+		return reservation;
 	}
 
 	private User user(Long id, String email) {
