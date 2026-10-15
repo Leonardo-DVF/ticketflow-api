@@ -5,6 +5,12 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/ticketflow}
     username: ${DB_USERNAME:ticketflow}
     password: ${DB_PASSWORD:ticketflow}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      repositories:
+        enabled: false
   jpa:
     hibernate:
       ddl-auto: validate
@@ -21,3 +27,5 @@ security:
 ticketflow:
   reservation:
     expiration-interval-ms: ${RESERVATION_EXPIRATION_INTERVAL_MS:60000}
+    lock:
+      ttl: ${RESERVATION_LOCK_TTL:10m}
