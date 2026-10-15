@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +22,11 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.repository.EventRepository;
+import com.leonardo.ticketflow.reservation.entity.Reservation;
+import com.leonardo.ticketflow.reservation.entity.ReservationItem;
+import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
+import com.leonardo.ticketflow.reservation.repository.ReservationItemRepository;
+import com.leonardo.ticketflow.reservation.repository.ReservationRepository;
 import com.leonardo.ticketflow.seat.entity.Seat;
 import com.leonardo.ticketflow.seat.entity.SeatStatus;
 import com.leonardo.ticketflow.seat.repository.SeatRepository;
@@ -55,6 +62,12 @@ class PersistenceIntegrationTest {
 
 	@Autowired
 	private SeatRepository seatRepository;
+
+	@Autowired
+	private ReservationRepository reservationRepository;
+
+	@Autowired
+	private ReservationItemRepository reservationItemRepository;
 
 	@Autowired
 	private EntityManager entityManager;
@@ -220,6 +233,93 @@ class PersistenceIntegrationTest {
 		seatRepository.saveAndFlush(new Seat(sector, "A1"));
 
 		assertThatThrownBy(() -> seatRepository.saveAndFlush(new Seat(sector, "a1")))
+				.isInstanceOf(DataIntegrityViolationException.class);
+	}
+
+	@Test
+	void shouldApplyReservationTableMigrations() {
+		Integer tableCount = jdbcClient.sql("""
+				SELECT COUNT(*)
+				FROM information_schema.tables
+				WHERE table_schema = 'public'
+				  AND table_name IN ('reservations', 'reservation_items')
+				""")
+				.query(Integer.class)
+				.single();
+
+		assertThat(tableCount).isEqualTo(2);
+	}
+
+	@Test
+	void shouldPersistPendingReservationWithPriceSnapshot() {
+		User user = userRepository.saveAndFlush(new User(
+				"Leonardo",
+				"reservation@example.com",
+				"encoded-password",
+				Role.USER));
+		Event event = new Event(
+				"Coldplay - Brasilia",
+				null,
+				"Arena BRB Mane Garrincha",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"));
+		event.changeStatus(EventStatus.AVAILABLE);
+		eventRepository.saveAndFlush(event);
+		Sector sector = sectorRepository.saveAndFlush(
+				new Sector(event, "VIP", new BigDecimal("250.00")));
+		Seat seat = seatRepository.saveAndFlush(new Seat(sector, "A1"));
+		Instant expiresAt = Instant.now().plusSeconds(600).truncatedTo(ChronoUnit.MICROS);
+		Reservation reservation = reservationRepository.saveAndFlush(
+				new Reservation(user, event, expiresAt, new BigDecimal("250.00")));
+		ReservationItem item = reservationItemRepository.saveAndFlush(
+				new ReservationItem(reservation, seat, new BigDecimal("250.00")));
+		Long reservationId = reservation.getId();
+		entityManager.clear();
+
+		Reservation persistedReservation = reservationRepository.findById(reservationId).orElseThrow();
+		ReservationItem persistedItem = reservationItemRepository.findById(item.getId()).orElseThrow();
+
+		assertThat(persistedReservation.getStatus()).isEqualTo(ReservationStatus.PENDING);
+		assertThat(persistedReservation.getUser().getId()).isEqualTo(user.getId());
+		assertThat(persistedReservation.getEvent().getId()).isEqualTo(event.getId());
+		assertThat(persistedReservation.getExpiresAt()).isEqualTo(expiresAt);
+		assertThat(persistedReservation.getTotalAmount()).isEqualByComparingTo("250.00");
+		assertThat(persistedReservation.getCreatedAt()).isNotNull();
+		assertThat(persistedItem.getReservation().getId()).isEqualTo(reservationId);
+		assertThat(persistedItem.getSeat().getId()).isEqualTo(seat.getId());
+		assertThat(persistedItem.getUnitPrice()).isEqualByComparingTo("250.00");
+		assertThat(reservationRepository.findByIdAndUserId(reservationId, user.getId())).isPresent();
+		assertThat(reservationRepository.findAllByStatusAndExpiresAtBefore(
+				ReservationStatus.PENDING,
+				expiresAt.plusSeconds(1)))
+				.extracting(Reservation::getId)
+				.containsExactly(reservationId);
+	}
+
+	@Test
+	void shouldRejectDuplicatedSeatInsideSameReservation() {
+		User user = userRepository.saveAndFlush(new User(
+				"Leonardo",
+				"duplicate-item@example.com",
+				"encoded-password",
+				Role.USER));
+		Event event = eventRepository.saveAndFlush(new Event(
+				"Coldplay - Brasilia",
+				null,
+				"Arena BRB Mane Garrincha",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00")));
+		Sector sector = sectorRepository.saveAndFlush(
+				new Sector(event, "VIP", new BigDecimal("250.00")));
+		Seat seat = seatRepository.saveAndFlush(new Seat(sector, "A1"));
+		Reservation reservation = reservationRepository.saveAndFlush(new Reservation(
+				user,
+				event,
+				Instant.now().plusSeconds(600),
+				new BigDecimal("250.00")));
+		reservationItemRepository.saveAndFlush(
+				new ReservationItem(reservation, seat, new BigDecimal("250.00")));
+
+		assertThatThrownBy(() -> reservationItemRepository.saveAndFlush(
+				new ReservationItem(reservation, seat, new BigDecimal("250.00"))))
 				.isInstanceOf(DataIntegrityViolationException.class);
 	}
 }
