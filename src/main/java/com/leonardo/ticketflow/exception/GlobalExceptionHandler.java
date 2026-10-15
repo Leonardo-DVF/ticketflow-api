@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.leonardo.ticketflow.event.exception.InvalidEventException;
+import com.leonardo.ticketflow.reservation.exception.InvalidReservationException;
+import com.leonardo.ticketflow.reservation.exception.SeatUnavailableException;
 import com.leonardo.ticketflow.seat.exception.InvalidSeatException;
 import com.leonardo.ticketflow.seat.exception.SeatAlreadyExistsException;
 import com.leonardo.ticketflow.sector.exception.InvalidSectorException;
@@ -53,9 +55,23 @@ public class GlobalExceptionHandler {
 		return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request.getRequestURI());
 	}
 
+	@ExceptionHandler(SeatUnavailableException.class)
+	public ResponseEntity<ApiError> handleSeatUnavailable(
+			SeatUnavailableException exception,
+			HttpServletRequest request) {
+		return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request.getRequestURI());
+	}
+
 	@ExceptionHandler(InvalidEventException.class)
 	public ResponseEntity<ApiError> handleInvalidEvent(
 			InvalidEventException exception,
+			HttpServletRequest request) {
+		return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request.getRequestURI());
+	}
+
+	@ExceptionHandler(InvalidReservationException.class)
+	public ResponseEntity<ApiError> handleInvalidReservation(
+			InvalidReservationException exception,
 			HttpServletRequest request) {
 		return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request.getRequestURI());
 	}

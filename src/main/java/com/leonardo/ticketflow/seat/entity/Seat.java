@@ -43,6 +43,13 @@ public class Seat {
 		this.status = SeatStatus.AVAILABLE;
 	}
 
+	public void reserve() {
+		if (status != SeatStatus.AVAILABLE) {
+			throw new IllegalStateException("Only available seats can be reserved");
+		}
+		status = SeatStatus.RESERVED;
+	}
+
 	@PrePersist
 	void assignInitialStatus() {
 		if (status == null) {
