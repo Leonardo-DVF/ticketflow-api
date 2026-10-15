@@ -17,6 +17,20 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    admin:
+      fail-fast: true
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: ticketflow
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.leonardo.ticketflow.kafka.event
 
 security:
   jwt:
@@ -29,3 +43,6 @@ ticketflow:
     expiration-interval-ms: ${RESERVATION_EXPIRATION_INTERVAL_MS:60000}
     lock:
       ttl: ${RESERVATION_LOCK_TTL:10m}
+  kafka:
+    topic-partitions: ${KAFKA_TOPIC_PARTITIONS:3}
+    replication-factor: ${KAFKA_REPLICATION_FACTOR:1}
