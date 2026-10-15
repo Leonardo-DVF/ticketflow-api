@@ -94,4 +94,40 @@ class RedisSeatLockServiceTest {
 
 		assertThat(released).isFalse();
 	}
+
+	@Test
+	void shouldTransferLockToReservationOwner() {
+		when(redisTemplate.execute(
+				org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
+				eq(List.of("seat:lock:10:100")),
+				eq("pending:token"),
+				eq("reservation:50")))
+				.thenReturn(1L);
+
+		boolean transferred = lockService.transfer(
+				10L,
+				100L,
+				"pending:token",
+				"reservation:50");
+
+		assertThat(transferred).isTrue();
+	}
+
+	@Test
+	void shouldNotTransferLockOwnedByAnotherToken() {
+		when(redisTemplate.execute(
+				org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
+				eq(List.of("seat:lock:10:100")),
+				eq("pending:wrong-token"),
+				eq("reservation:50")))
+				.thenReturn(0L);
+
+		boolean transferred = lockService.transfer(
+				10L,
+				100L,
+				"pending:wrong-token",
+				"reservation:50");
+
+		assertThat(transferred).isFalse();
+	}
 }

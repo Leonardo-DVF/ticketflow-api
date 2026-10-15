@@ -2,9 +2,12 @@ package com.leonardo.ticketflow.reservation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -32,6 +35,7 @@ import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
 import com.leonardo.ticketflow.reservation.exception.InvalidReservationException;
 import com.leonardo.ticketflow.reservation.exception.ReservationNotCancellableException;
 import com.leonardo.ticketflow.reservation.exception.SeatUnavailableException;
+import com.leonardo.ticketflow.reservation.lock.RedisSeatLockService;
 import com.leonardo.ticketflow.reservation.repository.ReservationItemRepository;
 import com.leonardo.ticketflow.reservation.repository.ReservationRepository;
 import com.leonardo.ticketflow.seat.entity.Seat;
@@ -62,6 +66,9 @@ class ReservationServiceTest {
 	@Mock
 	private ReservationItemRepository reservationItemRepository;
 
+	@Mock
+	private RedisSeatLockService seatLockService;
+
 	private ReservationService reservationService;
 
 	@BeforeEach
@@ -72,6 +79,7 @@ class ReservationServiceTest {
 				seatRepository,
 				reservationRepository,
 				reservationItemRepository,
+				seatLockService,
 				Clock.fixed(NOW, ZoneOffset.UTC));
 	}
 
@@ -90,11 +98,21 @@ class ReservationServiceTest {
 				.thenReturn(Optional.of(event));
 		when(seatRepository.findAllByIdWithLock(List.of(100L, 101L)))
 				.thenReturn(List.of(firstSeat, secondSeat));
+		when(seatLockService.acquire(eq(10L), eq(100L), anyString())).thenReturn(true);
+		when(seatLockService.acquire(eq(10L), eq(101L), anyString())).thenReturn(true);
 		when(reservationRepository.save(org.mockito.ArgumentMatchers.any(Reservation.class)))
-				.thenAnswer(invocation -> invocation.getArgument(0));
+				.thenAnswer(invocation -> {
+					Reservation reservation = invocation.getArgument(0);
+					ReflectionTestUtils.setField(reservation, "id", 50L);
+					return reservation;
+				});
 		when(reservationItemRepository.saveAll(
 				org.mockito.ArgumentMatchers.<ReservationItem>anyList()))
 				.thenAnswer(invocation -> invocation.getArgument(0));
+		when(seatLockService.transfer(eq(10L), eq(100L), anyString(), eq("reservation:50")))
+				.thenReturn(true);
+		when(seatLockService.transfer(eq(10L), eq(101L), anyString(), eq("reservation:50")))
+				.thenReturn(true);
 
 		ReservationResponse response = reservationService.create(
 				"leonardo@example.com",
@@ -120,6 +138,7 @@ class ReservationServiceTest {
 		when(eventRepository.findByIdAndStatus(10L, EventStatus.AVAILABLE))
 				.thenReturn(Optional.of(event));
 		when(seatRepository.findAllByIdWithLock(List.of(100L))).thenReturn(List.of(seat));
+		when(seatLockService.acquire(eq(10L), eq(100L), anyString())).thenReturn(true);
 
 		assertThatThrownBy(() -> reservationService.create(
 				"leonardo@example.com",
@@ -128,6 +147,7 @@ class ReservationServiceTest {
 				.hasMessage("Seat is not available: A1");
 
 		verifyNoInteractions(reservationRepository, reservationItemRepository);
+		verify(seatLockService).release(eq(10L), eq(100L), anyString());
 	}
 
 	@Test
@@ -141,12 +161,14 @@ class ReservationServiceTest {
 		when(eventRepository.findByIdAndStatus(10L, EventStatus.AVAILABLE))
 				.thenReturn(Optional.of(selectedEvent));
 		when(seatRepository.findAllByIdWithLock(List.of(100L))).thenReturn(List.of(seat));
+		when(seatLockService.acquire(eq(10L), eq(100L), anyString())).thenReturn(true);
 
 		assertThatThrownBy(() -> reservationService.create(
 				"leonardo@example.com",
 				new CreateReservationRequest(10L, List.of(100L))))
 				.isInstanceOf(InvalidReservationException.class)
 				.hasMessage("All seats must belong to the selected event");
+		verify(seatLockService).release(eq(10L), eq(100L), anyString());
 	}
 
 	@Test
@@ -159,6 +181,30 @@ class ReservationServiceTest {
 				.isInstanceOf(InvalidReservationException.class)
 				.hasMessage("Seat ids must not be duplicated");
 
+		verifyNoInteractions(
+				userRepository,
+				eventRepository,
+				seatRepository,
+				reservationRepository,
+				reservationItemRepository,
+				seatLockService);
+	}
+
+	@Test
+	void shouldReleasePreviouslyAcquiredLocksWhenOneSeatIsAlreadyLocked() {
+		CreateReservationRequest request = new CreateReservationRequest(
+				10L,
+				List.of(100L, 101L));
+		when(seatLockService.acquire(eq(10L), eq(100L), anyString())).thenReturn(true);
+		when(seatLockService.acquire(eq(10L), eq(101L), anyString())).thenReturn(false);
+
+		assertThatThrownBy(() -> reservationService.create(
+				"leonardo@example.com",
+				request))
+				.isInstanceOf(SeatUnavailableException.class)
+				.hasMessage("Seat is currently reserved: 101");
+
+		verify(seatLockService).release(eq(10L), eq(100L), anyString());
 		verifyNoInteractions(
 				userRepository,
 				eventRepository,
@@ -233,11 +279,15 @@ class ReservationServiceTest {
 				.thenReturn(List.of(item));
 		when(seatRepository.findAllByIdWithLock(List.of(100L)))
 				.thenReturn(List.of(seat));
+		doThrow(new RuntimeException("Redis unavailable"))
+				.when(seatLockService)
+				.release(10L, 100L, "reservation:50");
 
 		reservationService.cancel("leonardo@example.com", 50L);
 
 		assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.CANCELLED);
 		assertThat(seat.getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+		verify(seatLockService).release(10L, 100L, "reservation:50");
 	}
 
 	@Test

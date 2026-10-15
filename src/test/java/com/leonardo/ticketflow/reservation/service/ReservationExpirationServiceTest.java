@@ -1,8 +1,10 @@
 package com.leonardo.ticketflow.reservation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -22,6 +24,7 @@ import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.reservation.entity.Reservation;
 import com.leonardo.ticketflow.reservation.entity.ReservationItem;
 import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
+import com.leonardo.ticketflow.reservation.lock.RedisSeatLockService;
 import com.leonardo.ticketflow.reservation.repository.ReservationItemRepository;
 import com.leonardo.ticketflow.reservation.repository.ReservationRepository;
 import com.leonardo.ticketflow.seat.entity.Seat;
@@ -45,6 +48,9 @@ class ReservationExpirationServiceTest {
 	@Mock
 	private SeatRepository seatRepository;
 
+	@Mock
+	private RedisSeatLockService seatLockService;
+
 	private ReservationExpirationService expirationService;
 
 	@BeforeEach
@@ -53,6 +59,7 @@ class ReservationExpirationServiceTest {
 				reservationRepository,
 				reservationItemRepository,
 				seatRepository,
+				seatLockService,
 				Clock.fixed(NOW, ZoneOffset.UTC));
 	}
 
@@ -63,6 +70,7 @@ class ReservationExpirationServiceTest {
 				null,
 				"Arena BRB Mane Garrincha",
 				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"));
+		ReflectionTestUtils.setField(event, "id", 10L);
 		Sector sector = new Sector(event, "VIP", new BigDecimal("250.00"));
 		Seat seat = new Seat(sector, "A1");
 		seat.reserve();
@@ -88,12 +96,16 @@ class ReservationExpirationServiceTest {
 				.thenReturn(List.of(item));
 		when(seatRepository.findAllByIdWithLock(List.of(100L)))
 				.thenReturn(List.of(seat));
+		doThrow(new RuntimeException("Redis unavailable"))
+				.when(seatLockService)
+				.release(10L, 100L, "reservation:50");
 
 		int expiredCount = expirationService.expireDueReservations();
 
 		assertThat(expiredCount).isEqualTo(1);
 		assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.EXPIRED);
 		assertThat(seat.getStatus()).isEqualTo(SeatStatus.AVAILABLE);
+		verify(seatLockService).release(10L, 100L, "reservation:50");
 	}
 
 	@Test
@@ -104,6 +116,6 @@ class ReservationExpirationServiceTest {
 		int expiredCount = expirationService.expireDueReservations();
 
 		assertThat(expiredCount).isZero();
-		verifyNoInteractions(reservationItemRepository, seatRepository);
+		verifyNoInteractions(reservationItemRepository, seatRepository, seatLockService);
 	}
 }

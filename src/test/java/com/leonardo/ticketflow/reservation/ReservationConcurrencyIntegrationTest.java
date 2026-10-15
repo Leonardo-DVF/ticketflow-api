@@ -25,6 +25,10 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -36,6 +40,7 @@ import com.leonardo.ticketflow.reservation.dto.CreateReservationRequest;
 import com.leonardo.ticketflow.reservation.dto.ReservationResponse;
 import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
 import com.leonardo.ticketflow.reservation.exception.SeatUnavailableException;
+import com.leonardo.ticketflow.reservation.lock.RedisSeatLockService;
 import com.leonardo.ticketflow.reservation.repository.ReservationRepository;
 import com.leonardo.ticketflow.reservation.repository.ReservationItemRepository;
 import com.leonardo.ticketflow.reservation.service.ReservationService;
@@ -60,6 +65,16 @@ class ReservationConcurrencyIntegrationTest {
 	@Container
 	@ServiceConnection
 	static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
+
+	@Container
+	static final GenericContainer<?> redis = new GenericContainer<>("redis:8-alpine")
+			.withExposedPorts(6379);
+
+	@DynamicPropertySource
+	static void redisProperties(DynamicPropertyRegistry registry) {
+		registry.add("spring.data.redis.host", redis::getHost);
+		registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
+	}
 
 	@Autowired
 	private UserRepository userRepository;
@@ -86,11 +101,18 @@ class ReservationConcurrencyIntegrationTest {
 	private ReservationExpirationService expirationService;
 
 	@Autowired
+	private RedisSeatLockService seatLockService;
+
+	@Autowired
+	private StringRedisTemplate redisTemplate;
+
+	@Autowired
 	private MutableClock clock;
 
 	@BeforeEach
 	void cleanDatabase() {
 		clock.setInstant(TEST_NOW);
+		redisTemplate.delete(redisTemplate.keys("seat:lock:*"));
 		reservationItemRepository.deleteAll();
 		reservationRepository.deleteAll();
 		seatRepository.deleteAll();
@@ -119,6 +141,11 @@ class ReservationConcurrencyIntegrationTest {
 		var reservation = reservationService.create(
 				user.getEmail(),
 				new CreateReservationRequest(event.getId(), List.of(seat.getId())));
+		assertThat(seatLockService.acquire(
+				event.getId(),
+				seat.getId(),
+				"probe"))
+				.isFalse();
 		clock.setInstant(TEST_NOW.plusSeconds(11 * 60));
 
 		int expiredCount = expirationService.expireDueReservations();
@@ -128,6 +155,11 @@ class ReservationConcurrencyIntegrationTest {
 				.isEqualTo(ReservationStatus.EXPIRED);
 		assertThat(seatRepository.findById(seat.getId()).orElseThrow().getStatus())
 				.isEqualTo(SeatStatus.AVAILABLE);
+		assertThat(seatLockService.acquire(
+				event.getId(),
+				seat.getId(),
+				"probe"))
+				.isTrue();
 	}
 
 	@Test
@@ -219,6 +251,11 @@ class ReservationConcurrencyIntegrationTest {
 				.isEqualTo(ReservationStatus.CANCELLED);
 		assertThat(seatRepository.findById(seat.getId()).orElseThrow().getStatus())
 				.isEqualTo(SeatStatus.AVAILABLE);
+		assertThat(seatLockService.acquire(
+				event.getId(),
+				seat.getId(),
+				"probe"))
+				.isTrue();
 	}
 
 	private Attempt attemptReservation(

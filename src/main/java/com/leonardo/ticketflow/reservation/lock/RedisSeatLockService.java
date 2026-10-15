@@ -18,6 +18,15 @@ public class RedisSeatLockService {
 			return 0
 			""",
 			Long.class);
+	private static final DefaultRedisScript<Long> TRANSFER_SCRIPT = new DefaultRedisScript<>(
+			"""
+			if redis.call('get', KEYS[1]) == ARGV[1] then
+			    redis.call('set', KEYS[1], ARGV[2], 'KEEPTTL')
+			    return 1
+			end
+			return 0
+			""",
+			Long.class);
 
 	private final StringRedisTemplate redisTemplate;
 	private final SeatLockProperties properties;
@@ -43,6 +52,19 @@ public class RedisSeatLockService {
 				List.of(key(eventId, seatId)),
 				lockOwner);
 		return Long.valueOf(1L).equals(released);
+	}
+
+	public boolean transfer(
+			Long eventId,
+			Long seatId,
+			String currentOwner,
+			String newOwner) {
+		Long transferred = redisTemplate.execute(
+				TRANSFER_SCRIPT,
+				List.of(key(eventId, seatId)),
+				currentOwner,
+				newOwner);
+		return Long.valueOf(1L).equals(transferred);
 	}
 
 	String key(Long eventId, Long seatId) {

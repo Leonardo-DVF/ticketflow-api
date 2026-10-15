@@ -6,7 +6,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +27,7 @@ import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
 import com.leonardo.ticketflow.reservation.exception.InvalidReservationException;
 import com.leonardo.ticketflow.reservation.exception.ReservationNotCancellableException;
 import com.leonardo.ticketflow.reservation.exception.SeatUnavailableException;
+import com.leonardo.ticketflow.reservation.lock.RedisSeatLockService;
 import com.leonardo.ticketflow.reservation.repository.ReservationItemRepository;
 import com.leonardo.ticketflow.reservation.repository.ReservationRepository;
 import com.leonardo.ticketflow.seat.entity.Seat;
@@ -42,6 +46,7 @@ public class ReservationService {
 	private final SeatRepository seatRepository;
 	private final ReservationRepository reservationRepository;
 	private final ReservationItemRepository reservationItemRepository;
+	private final RedisSeatLockService seatLockService;
 	private final Clock clock;
 
 	public ReservationService(
@@ -50,22 +55,40 @@ public class ReservationService {
 			SeatRepository seatRepository,
 			ReservationRepository reservationRepository,
 			ReservationItemRepository reservationItemRepository,
+			RedisSeatLockService seatLockService,
 			Clock clock) {
 		this.userRepository = userRepository;
 		this.eventRepository = eventRepository;
 		this.seatRepository = seatRepository;
 		this.reservationRepository = reservationRepository;
 		this.reservationItemRepository = reservationItemRepository;
+		this.seatLockService = seatLockService;
 		this.clock = clock;
 	}
 
 	@Transactional
 	public ReservationResponse create(String userEmail, CreateReservationRequest request) {
 		List<Long> seatIds = validateAndSortSeatIds(request.seatIds());
+		Map<Long, String> lockOwners = acquireLocks(request.eventId(), seatIds);
+		TransactionActions.afterRollback(
+				() -> releaseLocks(request.eventId(), lockOwners));
+		try {
+			return createReservation(userEmail, request.eventId(), seatIds, lockOwners);
+		} catch (RuntimeException exception) {
+			releaseLocks(request.eventId(), lockOwners);
+			throw exception;
+		}
+	}
+
+	private ReservationResponse createReservation(
+			String userEmail,
+			Long eventId,
+			List<Long> seatIds,
+			Map<Long, String> lockOwners) {
 		User user = userRepository.findByEmailIgnoreCase(userEmail)
 				.orElseThrow(() -> new ResourceNotFoundException("User not found: " + userEmail));
-		Event event = eventRepository.findByIdAndStatus(request.eventId(), EventStatus.AVAILABLE)
-				.orElseThrow(() -> new ResourceNotFoundException("Event not found: " + request.eventId()));
+		Event event = eventRepository.findByIdAndStatus(eventId, EventStatus.AVAILABLE)
+				.orElseThrow(() -> new ResourceNotFoundException("Event not found: " + eventId));
 
 		List<Seat> seats = seatRepository.findAllByIdWithLock(seatIds);
 		if (seats.size() != seatIds.size()) {
@@ -86,6 +109,7 @@ public class ReservationService {
 			items.add(new ReservationItem(reservation, seat, seat.getSector().getPrice()));
 		}
 		reservationItemRepository.saveAll(items);
+		transferLocks(eventId, reservation.getId(), lockOwners);
 
 		return toResponse(reservation, items);
 	}
@@ -131,6 +155,61 @@ public class ReservationService {
 		List<Seat> seats = seatRepository.findAllByIdWithLock(seatIds);
 		seats.forEach(Seat::release);
 		reservation.cancel();
+		Long eventId = reservation.getEvent().getId();
+		String lockOwner = reservationOwner(reservationId);
+		TransactionActions.afterCommit(() -> seatIds.forEach(
+				seatId -> releaseLockQuietly(eventId, seatId, lockOwner)));
+	}
+
+	private Map<Long, String> acquireLocks(Long eventId, List<Long> seatIds) {
+		String temporaryOwner = "pending:" + UUID.randomUUID();
+		Map<Long, String> lockOwners = new LinkedHashMap<>();
+		try {
+			for (Long seatId : seatIds) {
+				if (!seatLockService.acquire(eventId, seatId, temporaryOwner)) {
+					throw new SeatUnavailableException(seatId);
+				}
+				lockOwners.put(seatId, temporaryOwner);
+			}
+			return lockOwners;
+		} catch (RuntimeException exception) {
+			releaseLocks(eventId, lockOwners);
+			throw exception;
+		}
+	}
+
+	private void transferLocks(
+			Long eventId,
+			Long reservationId,
+			Map<Long, String> lockOwners) {
+		String reservationOwner = reservationOwner(reservationId);
+		for (Map.Entry<Long, String> lock : lockOwners.entrySet()) {
+			if (!seatLockService.transfer(
+					eventId,
+					lock.getKey(),
+					lock.getValue(),
+					reservationOwner)) {
+				throw new IllegalStateException(
+						"Could not associate seat lock with reservation");
+			}
+			lock.setValue(reservationOwner);
+		}
+	}
+
+	private void releaseLocks(Long eventId, Map<Long, String> lockOwners) {
+		lockOwners.forEach((seatId, owner) -> releaseLockQuietly(eventId, seatId, owner));
+	}
+
+	private void releaseLockQuietly(Long eventId, Long seatId, String owner) {
+		try {
+			seatLockService.release(eventId, seatId, owner);
+		} catch (RuntimeException ignored) {
+			// The TTL is the final safeguard when Redis is unavailable during cleanup.
+		}
+	}
+
+	private String reservationOwner(Long reservationId) {
+		return "reservation:" + reservationId;
 	}
 
 	private ResourceNotFoundException reservationNotFound(Long reservationId) {

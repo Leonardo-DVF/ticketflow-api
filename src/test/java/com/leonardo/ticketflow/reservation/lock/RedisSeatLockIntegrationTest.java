@@ -35,13 +35,21 @@ class RedisSeatLockIntegrationTest {
 					redisTemplate,
 					new SeatLockProperties(Duration.ofMinutes(10)));
 
-			assertThat(lockService.acquire(10L, 100L, "reservation:50")).isTrue();
+			assertThat(lockService.acquire(10L, 100L, "pending:token")).isTrue();
 			assertThat(lockService.acquire(10L, 100L, "reservation:51")).isFalse();
 			assertThat(redisTemplate.getExpire(
 					"seat:lock:10:100",
 					TimeUnit.SECONDS))
 					.isPositive()
 					.isLessThanOrEqualTo(600L);
+			assertThat(lockService.transfer(
+					10L,
+					100L,
+					"pending:token",
+					"reservation:50"))
+					.isTrue();
+			assertThat(redisTemplate.opsForValue().get("seat:lock:10:100"))
+					.isEqualTo("reservation:50");
 			assertThat(lockService.release(10L, 100L, "reservation:51")).isFalse();
 			assertThat(redisTemplate.hasKey("seat:lock:10:100")).isTrue();
 			assertThat(lockService.release(10L, 100L, "reservation:50")).isTrue();
