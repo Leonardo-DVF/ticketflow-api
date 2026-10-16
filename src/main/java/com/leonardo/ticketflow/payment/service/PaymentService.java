@@ -5,7 +5,11 @@ import java.time.Clock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.leonardo.ticketflow.common.transaction.TransactionActions;
 import com.leonardo.ticketflow.exception.ResourceNotFoundException;
+import com.leonardo.ticketflow.kafka.event.PaymentApprovedEvent;
+import com.leonardo.ticketflow.kafka.event.PaymentRejectedEvent;
+import com.leonardo.ticketflow.kafka.producer.PaymentEventProducer;
 import com.leonardo.ticketflow.payment.dto.PaymentResponse;
 import com.leonardo.ticketflow.payment.entity.Payment;
 import com.leonardo.ticketflow.payment.entity.PaymentStatus;
@@ -21,14 +25,17 @@ public class PaymentService {
 
 	private final ReservationRepository reservationRepository;
 	private final PaymentRepository paymentRepository;
+	private final PaymentEventProducer paymentEventProducer;
 	private final Clock clock;
 
 	public PaymentService(
 			ReservationRepository reservationRepository,
 			PaymentRepository paymentRepository,
+			PaymentEventProducer paymentEventProducer,
 			Clock clock) {
 		this.reservationRepository = reservationRepository;
 		this.paymentRepository = paymentRepository;
+		this.paymentEventProducer = paymentEventProducer;
 		this.clock = clock;
 	}
 
@@ -59,7 +66,33 @@ public class PaymentService {
 			payment.reject();
 		}
 
-		return toResponse(paymentRepository.save(payment));
+		Payment savedPayment = paymentRepository.save(payment);
+		registerEventAfterCommit(savedPayment);
+		return toResponse(savedPayment);
+	}
+
+	private void registerEventAfterCommit(Payment payment) {
+		Reservation reservation = payment.getReservation();
+		if (payment.getStatus() == PaymentStatus.APPROVED) {
+			PaymentApprovedEvent event = new PaymentApprovedEvent(
+					payment.getId(),
+					reservation.getId(),
+					reservation.getUser().getId(),
+					reservation.getEvent().getId(),
+					payment.getAmount(),
+					payment.getCreatedAt());
+			TransactionActions.afterCommit(() -> paymentEventProducer.publish(event));
+			return;
+		}
+
+		PaymentRejectedEvent event = new PaymentRejectedEvent(
+				payment.getId(),
+				reservation.getId(),
+				reservation.getUser().getId(),
+				reservation.getEvent().getId(),
+				payment.getAmount(),
+				payment.getCreatedAt());
+		TransactionActions.afterCommit(() -> paymentEventProducer.publish(event));
 	}
 
 	private void validate(Reservation reservation) {

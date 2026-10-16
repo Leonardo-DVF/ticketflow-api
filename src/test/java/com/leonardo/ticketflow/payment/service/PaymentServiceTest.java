@@ -18,8 +18,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.Mock;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.leonardo.ticketflow.event.entity.Event;
+import com.leonardo.ticketflow.kafka.event.PaymentApprovedEvent;
+import com.leonardo.ticketflow.kafka.event.PaymentRejectedEvent;
+import com.leonardo.ticketflow.kafka.producer.PaymentEventProducer;
 import com.leonardo.ticketflow.payment.dto.PaymentResponse;
 import com.leonardo.ticketflow.payment.entity.Payment;
 import com.leonardo.ticketflow.payment.entity.PaymentStatus;
@@ -43,6 +48,9 @@ class PaymentServiceTest {
 	@Mock
 	private PaymentRepository paymentRepository;
 
+	@Mock
+	private PaymentEventProducer paymentEventProducer;
+
 	private PaymentService paymentService;
 
 	@BeforeEach
@@ -50,6 +58,7 @@ class PaymentServiceTest {
 		paymentService = new PaymentService(
 				reservationRepository,
 				paymentRepository,
+				paymentEventProducer,
 				Clock.fixed(NOW, ZoneOffset.UTC));
 	}
 
@@ -70,6 +79,14 @@ class PaymentServiceTest {
 		assertThat(response.amount()).isEqualByComparingTo("250.00");
 		assertThat(response.status()).isEqualTo(PaymentStatus.APPROVED);
 		assertThat(response.createdAt()).isEqualTo(NOW);
+		org.mockito.Mockito.verify(paymentEventProducer).publish(
+				org.mockito.ArgumentMatchers.argThat((PaymentApprovedEvent event) ->
+						event.paymentId().equals(80L)
+								&& event.reservationId().equals(50L)
+								&& event.userId().equals(1L)
+								&& event.eventId().equals(10L)
+								&& event.amount().compareTo(new BigDecimal("250.00")) == 0
+								&& event.occurredAt().equals(NOW)));
 	}
 
 	@Test
@@ -86,6 +103,34 @@ class PaymentServiceTest {
 
 		assertThat(response.status()).isEqualTo(PaymentStatus.REJECTED);
 		assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.PENDING);
+		org.mockito.Mockito.verify(paymentEventProducer).publish(
+				org.mockito.ArgumentMatchers.argThat((PaymentRejectedEvent event) ->
+						event.paymentId().equals(80L)
+								&& event.reservationId().equals(50L)));
+	}
+
+	@Test
+	void shouldPublishOnlyAfterTransactionCommit() {
+		Reservation reservation = reservation();
+		when(reservationRepository.findOwnedByIdWithLock(50L, "leonardo@example.com"))
+				.thenReturn(Optional.of(reservation));
+		when(paymentRepository.existsByReservationIdAndStatus(50L, PaymentStatus.APPROVED))
+				.thenReturn(false);
+		when(paymentRepository.save(org.mockito.ArgumentMatchers.any(Payment.class)))
+				.thenAnswer(invocation -> savedPayment(invocation.getArgument(0), 80L));
+		TransactionSynchronizationManager.initSynchronization();
+
+		try {
+			paymentService.approve("leonardo@example.com", 50L);
+
+			verifyNoInteractions(paymentEventProducer);
+			TransactionSynchronizationManager.getSynchronizations()
+					.forEach(TransactionSynchronization::afterCommit);
+			org.mockito.Mockito.verify(paymentEventProducer)
+					.publish(org.mockito.ArgumentMatchers.any(PaymentApprovedEvent.class));
+		} finally {
+			TransactionSynchronizationManager.clearSynchronization();
+		}
 	}
 
 	@Test

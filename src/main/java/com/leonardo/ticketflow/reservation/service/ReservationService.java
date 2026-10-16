@@ -14,6 +14,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.leonardo.ticketflow.common.transaction.TransactionActions;
 import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.repository.EventRepository;

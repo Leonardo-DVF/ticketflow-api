@@ -51,6 +51,44 @@ class KafkaEventSerializationTest {
 				.contains("\"expiredAt\"");
 	}
 
+	@Test
+	void shouldSerializePaymentApprovedEvent() {
+		PaymentApprovedEvent event = new PaymentApprovedEvent(
+				80L,
+				50L,
+				1L,
+				10L,
+				new BigDecimal("250.00"),
+				Instant.parse("2026-10-16T15:00:00Z"));
+
+		String json = serialize(KafkaTopics.PAYMENT_APPROVED, event);
+
+		assertThat(json)
+				.contains("\"paymentId\":80")
+				.contains("\"reservationId\":50")
+				.contains("\"amount\":250.00")
+				.contains("\"occurredAt\"");
+	}
+
+	@Test
+	void shouldSerializePaymentRejectedEvent() {
+		PaymentRejectedEvent event = new PaymentRejectedEvent(
+				81L,
+				50L,
+				1L,
+				10L,
+				new BigDecimal("250.00"),
+				Instant.parse("2026-10-16T15:00:00Z"));
+
+		String json = serialize(KafkaTopics.PAYMENT_REJECTED, event);
+
+		assertThat(json)
+				.contains("\"paymentId\":81")
+				.contains("\"reservationId\":50")
+				.contains("\"amount\":250.00")
+				.contains("\"occurredAt\"");
+	}
+
 	private String serialize(String topic, Object event) {
 		return new String(serializer.serialize(topic, event), StandardCharsets.UTF_8);
 	}

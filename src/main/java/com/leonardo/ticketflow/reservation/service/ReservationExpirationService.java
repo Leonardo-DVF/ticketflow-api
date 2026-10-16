@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.leonardo.ticketflow.common.transaction.TransactionActions;
 import com.leonardo.ticketflow.kafka.event.ReservationExpiredEvent;
 import com.leonardo.ticketflow.kafka.producer.ReservationEventProducer;
 import com.leonardo.ticketflow.reservation.entity.Reservation;

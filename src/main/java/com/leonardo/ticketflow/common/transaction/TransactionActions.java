@@ -1,14 +1,14 @@
-package com.leonardo.ticketflow.reservation.service;
+package com.leonardo.ticketflow.common.transaction;
 
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-final class TransactionActions {
+public final class TransactionActions {
 
 	private TransactionActions() {
 	}
 
-	static void afterCommit(Runnable action) {
+	public static void afterCommit(Runnable action) {
 		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
 			action.run();
 			return;
@@ -22,7 +22,7 @@ final class TransactionActions {
 				});
 	}
 
-	static void afterRollback(Runnable action) {
+	public static void afterRollback(Runnable action) {
 		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
 			return;
 		}
