@@ -7,6 +7,7 @@ import com.leonardo.ticketflow.audit.entity.AuditEventType;
 import com.leonardo.ticketflow.audit.entity.AuditLog;
 import com.leonardo.ticketflow.audit.repository.AuditLogRepository;
 import com.leonardo.ticketflow.kafka.event.PaymentApprovedEvent;
+import com.leonardo.ticketflow.kafka.event.PaymentRejectedEvent;
 
 @Service
 public class AuditService {
@@ -27,6 +28,24 @@ public class AuditService {
 
 		auditLogRepository.save(new AuditLog(
 				AuditEventType.PAYMENT_APPROVED,
+				event.paymentId(),
+				event.reservationId(),
+				event.userId(),
+				event.eventId(),
+				event.amount(),
+				event.occurredAt()));
+	}
+
+	@Transactional
+	public void recordPaymentRejected(PaymentRejectedEvent event) {
+		if (auditLogRepository.existsByEventTypeAndAggregateId(
+				AuditEventType.PAYMENT_REJECTED,
+				event.paymentId())) {
+			return;
+		}
+
+		auditLogRepository.save(new AuditLog(
+				AuditEventType.PAYMENT_REJECTED,
 				event.paymentId(),
 				event.reservationId(),
 				event.userId(),
