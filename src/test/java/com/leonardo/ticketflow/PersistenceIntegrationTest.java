@@ -35,6 +35,8 @@ import com.leonardo.ticketflow.seat.entity.SeatStatus;
 import com.leonardo.ticketflow.seat.repository.SeatRepository;
 import com.leonardo.ticketflow.sector.entity.Sector;
 import com.leonardo.ticketflow.sector.repository.SectorRepository;
+import com.leonardo.ticketflow.ticket.entity.Ticket;
+import com.leonardo.ticketflow.ticket.repository.TicketRepository;
 import com.leonardo.ticketflow.user.entity.Role;
 import com.leonardo.ticketflow.user.entity.User;
 import com.leonardo.ticketflow.user.repository.UserRepository;
@@ -74,6 +76,9 @@ class PersistenceIntegrationTest {
 
 	@Autowired
 	private PaymentRepository paymentRepository;
+
+	@Autowired
+	private TicketRepository ticketRepository;
 
 	@Autowired
 	private EntityManager entityManager;
@@ -416,5 +421,44 @@ class PersistenceIntegrationTest {
 				PaymentStatus.APPROVED))
 				.extracting(Reservation::getId)
 				.containsExactly(unpaidReservation.getId());
+	}
+
+	@Test
+	void shouldPersistOneTicketPerSeat() {
+		User user = userRepository.saveAndFlush(new User(
+				"Leonardo",
+				"ticket@example.com",
+				"encoded-password",
+				Role.USER));
+		Event event = eventRepository.saveAndFlush(new Event(
+				"Coldplay - Brasilia",
+				null,
+				"Arena BRB Mane Garrincha",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00")));
+		Sector sector = sectorRepository.saveAndFlush(
+				new Sector(event, "VIP", new BigDecimal("250.00")));
+		Seat seat = new Seat(sector, "A1");
+		seat.reserve();
+		seat.sell();
+		seatRepository.saveAndFlush(seat);
+		Reservation reservation = new Reservation(
+				user,
+				event,
+				Instant.now().plusSeconds(600),
+				new BigDecimal("250.00"));
+		reservation.confirm();
+		reservationRepository.saveAndFlush(reservation);
+		Ticket ticket = ticketRepository.saveAndFlush(new Ticket(reservation, seat));
+
+		assertThat(ticket.getId()).isNotNull();
+		assertThat(ticket.getCode()).isNotNull();
+		assertThat(ticket.getCreatedAt()).isNotNull();
+		assertThat(ticketRepository.findAllByReservationIdOrderById(reservation.getId()))
+				.extracting(Ticket::getSeat)
+				.extracting(Seat::getId)
+				.containsExactly(seat.getId());
+		assertThatThrownBy(() -> ticketRepository.saveAndFlush(
+				new Ticket(reservation, seat)))
+				.isInstanceOf(DataIntegrityViolationException.class);
 	}
 }

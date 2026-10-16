@@ -8,6 +8,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.leonardo.ticketflow.common.transaction.TransactionActions;
 import com.leonardo.ticketflow.exception.ResourceNotFoundException;
 import com.leonardo.ticketflow.kafka.event.PaymentApprovedEvent;
+import com.leonardo.ticketflow.kafka.event.TicketIssuedEvent;
+import com.leonardo.ticketflow.kafka.producer.TicketEventProducer;
 import com.leonardo.ticketflow.payment.entity.Payment;
 import com.leonardo.ticketflow.payment.entity.PaymentStatus;
 import com.leonardo.ticketflow.payment.repository.PaymentRepository;
@@ -21,6 +23,8 @@ import com.leonardo.ticketflow.reservation.repository.ReservationRepository;
 import com.leonardo.ticketflow.seat.entity.Seat;
 import com.leonardo.ticketflow.seat.entity.SeatStatus;
 import com.leonardo.ticketflow.seat.repository.SeatRepository;
+import com.leonardo.ticketflow.ticket.entity.Ticket;
+import com.leonardo.ticketflow.ticket.repository.TicketRepository;
 
 @Service
 public class ReservationConfirmationService {
@@ -29,19 +33,25 @@ public class ReservationConfirmationService {
 	private final ReservationItemRepository reservationItemRepository;
 	private final PaymentRepository paymentRepository;
 	private final SeatRepository seatRepository;
+	private final TicketRepository ticketRepository;
 	private final RedisSeatLockService seatLockService;
+	private final TicketEventProducer ticketEventProducer;
 
 	public ReservationConfirmationService(
 			ReservationRepository reservationRepository,
 			ReservationItemRepository reservationItemRepository,
 			PaymentRepository paymentRepository,
 			SeatRepository seatRepository,
-			RedisSeatLockService seatLockService) {
+			TicketRepository ticketRepository,
+			RedisSeatLockService seatLockService,
+			TicketEventProducer ticketEventProducer) {
 		this.reservationRepository = reservationRepository;
 		this.reservationItemRepository = reservationItemRepository;
 		this.paymentRepository = paymentRepository;
 		this.seatRepository = seatRepository;
+		this.ticketRepository = ticketRepository;
 		this.seatLockService = seatLockService;
+		this.ticketEventProducer = ticketEventProducer;
 	}
 
 	@Transactional
@@ -75,10 +85,28 @@ public class ReservationConfirmationService {
 
 		seats.forEach(Seat::sell);
 		reservation.confirm();
+		List<Ticket> tickets = ticketRepository.saveAll(seats.stream()
+				.map(seat -> new Ticket(reservation, seat))
+				.toList());
 		Long eventId = reservation.getEvent().getId();
 		String lockOwner = "reservation:" + reservation.getId();
 		TransactionActions.afterCommit(() -> seatIds.forEach(
 				seatId -> releaseLockQuietly(eventId, seatId, lockOwner)));
+		List<TicketIssuedEvent> issuedEvents = tickets.stream()
+				.map(this::toIssuedEvent)
+				.toList();
+		TransactionActions.afterCommit(() -> issuedEvents.forEach(ticketEventProducer::publish));
+	}
+
+	private TicketIssuedEvent toIssuedEvent(Ticket ticket) {
+		return new TicketIssuedEvent(
+				ticket.getId(),
+				ticket.getReservation().getId(),
+				ticket.getUser().getId(),
+				ticket.getEvent().getId(),
+				ticket.getSeat().getId(),
+				ticket.getCode(),
+				ticket.getCreatedAt());
 	}
 
 	private void validatePendingReservation(

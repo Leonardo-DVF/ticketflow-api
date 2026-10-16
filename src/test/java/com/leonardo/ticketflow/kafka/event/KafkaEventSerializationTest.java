@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.support.serializer.JacksonJsonSerializer;
@@ -87,6 +88,26 @@ class KafkaEventSerializationTest {
 				.contains("\"reservationId\":50")
 				.contains("\"amount\":250.00")
 				.contains("\"occurredAt\"");
+	}
+
+	@Test
+	void shouldSerializeTicketIssuedEvent() {
+		TicketIssuedEvent event = new TicketIssuedEvent(
+				90L,
+				50L,
+				1L,
+				10L,
+				100L,
+				UUID.fromString("d4203978-e77a-4f9b-b99c-3c42f865f54c"),
+				Instant.parse("2026-10-16T15:00:00Z"));
+
+		String json = serialize(KafkaTopics.TICKET_ISSUED, event);
+
+		assertThat(json)
+				.contains("\"ticketId\":90")
+				.contains("\"seatId\":100")
+				.contains("\"code\":\"d4203978-e77a-4f9b-b99c-3c42f865f54c\"")
+				.contains("\"issuedAt\"");
 	}
 
 	private String serialize(String topic, Object event) {

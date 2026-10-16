@@ -17,10 +17,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.kafka.event.PaymentApprovedEvent;
+import com.leonardo.ticketflow.kafka.event.TicketIssuedEvent;
+import com.leonardo.ticketflow.kafka.producer.TicketEventProducer;
 import com.leonardo.ticketflow.payment.entity.Payment;
 import com.leonardo.ticketflow.payment.entity.PaymentStatus;
 import com.leonardo.ticketflow.payment.repository.PaymentRepository;
@@ -35,6 +38,8 @@ import com.leonardo.ticketflow.seat.entity.Seat;
 import com.leonardo.ticketflow.seat.entity.SeatStatus;
 import com.leonardo.ticketflow.seat.repository.SeatRepository;
 import com.leonardo.ticketflow.sector.entity.Sector;
+import com.leonardo.ticketflow.ticket.entity.Ticket;
+import com.leonardo.ticketflow.ticket.repository.TicketRepository;
 import com.leonardo.ticketflow.user.entity.Role;
 import com.leonardo.ticketflow.user.entity.User;
 
@@ -56,7 +61,13 @@ class ReservationConfirmationServiceTest {
 	private SeatRepository seatRepository;
 
 	@Mock
+	private TicketRepository ticketRepository;
+
+	@Mock
 	private RedisSeatLockService seatLockService;
+
+	@Mock
+	private TicketEventProducer ticketEventProducer;
 
 	private ReservationConfirmationService confirmationService;
 
@@ -67,7 +78,9 @@ class ReservationConfirmationServiceTest {
 				reservationItemRepository,
 				paymentRepository,
 				seatRepository,
-				seatLockService);
+				ticketRepository,
+				seatLockService,
+				ticketEventProducer);
 	}
 
 	@Test
@@ -84,12 +97,27 @@ class ReservationConfirmationServiceTest {
 				.thenReturn(List.of(fixture.item()));
 		when(seatRepository.findAllByIdWithLock(List.of(100L)))
 				.thenReturn(List.of(fixture.seat()));
+		when(ticketRepository.saveAll(org.mockito.ArgumentMatchers.<Ticket>anyList()))
+				.thenAnswer(invocation -> {
+					List<Ticket> tickets = invocation.getArgument(0);
+					ReflectionTestUtils.setField(tickets.getFirst(), "id", 90L);
+					ReflectionTestUtils.setField(tickets.getFirst(), "createdAt", NOW);
+					return tickets;
+				});
 
 		confirmationService.confirm(approvedEvent());
 
 		assertThat(fixture.reservation().getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
 		assertThat(fixture.seat().getStatus()).isEqualTo(SeatStatus.SOLD);
 		verify(seatLockService).release(10L, 100L, "reservation:50");
+		ArgumentCaptor<TicketIssuedEvent> eventCaptor = ArgumentCaptor.forClass(
+				TicketIssuedEvent.class);
+		verify(ticketEventProducer).publish(eventCaptor.capture());
+		assertThat(eventCaptor.getValue().ticketId()).isEqualTo(90L);
+		assertThat(eventCaptor.getValue().reservationId()).isEqualTo(50L);
+		assertThat(eventCaptor.getValue().seatId()).isEqualTo(100L);
+		assertThat(eventCaptor.getValue().code()).isNotNull();
+		assertThat(eventCaptor.getValue().issuedAt()).isEqualTo(NOW);
 	}
 
 	@Test
@@ -105,7 +133,9 @@ class ReservationConfirmationServiceTest {
 				paymentRepository,
 				reservationItemRepository,
 				seatRepository,
-				seatLockService);
+				ticketRepository,
+				seatLockService,
+				ticketEventProducer);
 	}
 
 	@Test
@@ -132,7 +162,12 @@ class ReservationConfirmationServiceTest {
 
 		assertThat(fixture.reservation().getStatus()).isEqualTo(ReservationStatus.PENDING);
 		assertThat(fixture.seat().getStatus()).isEqualTo(SeatStatus.RESERVED);
-		verifyNoInteractions(reservationItemRepository, seatRepository, seatLockService);
+		verifyNoInteractions(
+				reservationItemRepository,
+				seatRepository,
+				ticketRepository,
+				seatLockService,
+				ticketEventProducer);
 	}
 
 	private PaymentApprovedEvent approvedEvent() {
