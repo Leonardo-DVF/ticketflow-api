@@ -30,6 +30,8 @@ import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.repository.EventRepository;
 import com.leonardo.ticketflow.kafka.event.ReservationCreatedEvent;
 import com.leonardo.ticketflow.kafka.producer.ReservationEventProducer;
+import com.leonardo.ticketflow.payment.entity.PaymentStatus;
+import com.leonardo.ticketflow.payment.repository.PaymentRepository;
 import com.leonardo.ticketflow.reservation.dto.CreateReservationRequest;
 import com.leonardo.ticketflow.reservation.dto.ReservationResponse;
 import com.leonardo.ticketflow.reservation.entity.Reservation;
@@ -70,6 +72,9 @@ class ReservationServiceTest {
 	private ReservationItemRepository reservationItemRepository;
 
 	@Mock
+	private PaymentRepository paymentRepository;
+
+	@Mock
 	private RedisSeatLockService seatLockService;
 
 	@Mock
@@ -85,6 +90,7 @@ class ReservationServiceTest {
 				seatRepository,
 				reservationRepository,
 				reservationItemRepository,
+				paymentRepository,
 				seatLockService,
 				reservationEventProducer,
 				Clock.fixed(NOW, ZoneOffset.UTC));
@@ -327,6 +333,29 @@ class ReservationServiceTest {
 				.hasMessage("Only pending reservations can be cancelled");
 
 		verifyNoInteractions(seatRepository);
+	}
+
+	@Test
+	void shouldRejectCancellationAfterPaymentApproval() {
+		User user = user(1L, "leonardo@example.com");
+		Event event = event(10L);
+		Reservation reservation = reservation(50L, user, event);
+		when(reservationRepository.findOwnedByIdWithLock(
+				50L,
+				"leonardo@example.com"))
+				.thenReturn(Optional.of(reservation));
+		when(paymentRepository.existsByReservationIdAndStatus(
+				50L,
+				PaymentStatus.APPROVED))
+				.thenReturn(true);
+
+		assertThatThrownBy(() -> reservationService.cancel(
+				"leonardo@example.com",
+				50L))
+				.isInstanceOf(ReservationNotCancellableException.class)
+				.hasMessage("Reservation with an approved payment cannot be cancelled");
+
+		verifyNoInteractions(seatRepository, seatLockService);
 	}
 
 	private Reservation reservation(Long id, User user, Event event) {

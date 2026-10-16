@@ -9,6 +9,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.leonardo.ticketflow.common.transaction.TransactionActions;
 import com.leonardo.ticketflow.kafka.event.ReservationExpiredEvent;
 import com.leonardo.ticketflow.kafka.producer.ReservationEventProducer;
+import com.leonardo.ticketflow.payment.entity.PaymentStatus;
+import com.leonardo.ticketflow.payment.repository.PaymentRepository;
 import com.leonardo.ticketflow.reservation.entity.Reservation;
 import com.leonardo.ticketflow.reservation.entity.ReservationItem;
 import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
@@ -23,6 +25,7 @@ public class ReservationExpirationService {
 
 	private final ReservationRepository reservationRepository;
 	private final ReservationItemRepository reservationItemRepository;
+	private final PaymentRepository paymentRepository;
 	private final SeatRepository seatRepository;
 	private final RedisSeatLockService seatLockService;
 	private final ReservationEventProducer reservationEventProducer;
@@ -31,12 +34,14 @@ public class ReservationExpirationService {
 	public ReservationExpirationService(
 			ReservationRepository reservationRepository,
 			ReservationItemRepository reservationItemRepository,
+			PaymentRepository paymentRepository,
 			SeatRepository seatRepository,
 			RedisSeatLockService seatLockService,
 			ReservationEventProducer reservationEventProducer,
 			Clock clock) {
 		this.reservationRepository = reservationRepository;
 		this.reservationItemRepository = reservationItemRepository;
+		this.paymentRepository = paymentRepository;
 		this.seatRepository = seatRepository;
 		this.seatLockService = seatLockService;
 		this.reservationEventProducer = reservationEventProducer;
@@ -47,9 +52,16 @@ public class ReservationExpirationService {
 	public int expireDueReservations() {
 		List<Reservation> reservations = reservationRepository.findAllDueWithLock(
 				ReservationStatus.PENDING,
-				clock.instant());
+				clock.instant(),
+				PaymentStatus.APPROVED);
 
+		int expiredCount = 0;
 		for (Reservation reservation : reservations) {
+			if (paymentRepository.existsByReservationIdAndStatus(
+					reservation.getId(),
+					PaymentStatus.APPROVED)) {
+				continue;
+			}
 			List<Long> seatIds = reservationItemRepository
 					.findAllByReservationIdOrderById(reservation.getId())
 					.stream()
@@ -70,9 +82,10 @@ public class ReservationExpirationService {
 			TransactionActions.afterCommit(() -> seatIds.forEach(
 					seatId -> releaseLockQuietly(eventId, seatId, lockOwner)));
 			TransactionActions.afterCommit(() -> reservationEventProducer.publish(expiredEvent));
+			expiredCount++;
 		}
 
-		return reservations.size();
+		return expiredCount;
 	}
 
 	private void releaseLockQuietly(Long eventId, Long seatId, String owner) {

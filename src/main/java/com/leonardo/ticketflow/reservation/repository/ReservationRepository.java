@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 
 import com.leonardo.ticketflow.reservation.entity.Reservation;
 import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
+import com.leonardo.ticketflow.payment.entity.PaymentStatus;
 
 import jakarta.persistence.LockModeType;
 
@@ -35,6 +36,10 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
 			@Param("id") Long id,
 			@Param("email") String email);
 
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("SELECT reservation FROM Reservation reservation WHERE reservation.id = :id")
+	Optional<Reservation> findByIdWithLock(@Param("id") Long id);
+
 	List<Reservation> findAllByStatusAndExpiresAtBefore(
 			ReservationStatus status,
 			Instant expiresAt);
@@ -45,9 +50,16 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
 			FROM Reservation reservation
 			WHERE reservation.status = :status
 			AND reservation.expiresAt <= :now
+			AND NOT EXISTS (
+				SELECT payment.id
+				FROM Payment payment
+				WHERE payment.reservation = reservation
+				AND payment.status = :approvedPaymentStatus
+			)
 			ORDER BY reservation.id
 			""")
 	List<Reservation> findAllDueWithLock(
 			@Param("status") ReservationStatus status,
-			@Param("now") Instant now);
+			@Param("now") Instant now,
+			@Param("approvedPaymentStatus") PaymentStatus approvedPaymentStatus);
 }

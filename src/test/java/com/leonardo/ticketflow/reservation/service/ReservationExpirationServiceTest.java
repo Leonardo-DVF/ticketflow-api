@@ -23,6 +23,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.kafka.event.ReservationExpiredEvent;
 import com.leonardo.ticketflow.kafka.producer.ReservationEventProducer;
+import com.leonardo.ticketflow.payment.entity.PaymentStatus;
+import com.leonardo.ticketflow.payment.repository.PaymentRepository;
 import com.leonardo.ticketflow.reservation.entity.Reservation;
 import com.leonardo.ticketflow.reservation.entity.ReservationItem;
 import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
@@ -48,6 +50,9 @@ class ReservationExpirationServiceTest {
 	private ReservationItemRepository reservationItemRepository;
 
 	@Mock
+	private PaymentRepository paymentRepository;
+
+	@Mock
 	private SeatRepository seatRepository;
 
 	@Mock
@@ -63,6 +68,7 @@ class ReservationExpirationServiceTest {
 		expirationService = new ReservationExpirationService(
 				reservationRepository,
 				reservationItemRepository,
+				paymentRepository,
 				seatRepository,
 				seatLockService,
 				reservationEventProducer,
@@ -97,7 +103,10 @@ class ReservationExpirationServiceTest {
 				reservation,
 				seat,
 				new BigDecimal("250.00"));
-		when(reservationRepository.findAllDueWithLock(ReservationStatus.PENDING, NOW))
+		when(reservationRepository.findAllDueWithLock(
+				ReservationStatus.PENDING,
+				NOW,
+				PaymentStatus.APPROVED))
 				.thenReturn(List.of(reservation));
 		when(reservationItemRepository.findAllByReservationIdOrderById(50L))
 				.thenReturn(List.of(item));
@@ -123,12 +132,55 @@ class ReservationExpirationServiceTest {
 
 	@Test
 	void shouldDoNothingWhenThereAreNoDueReservations() {
-		when(reservationRepository.findAllDueWithLock(ReservationStatus.PENDING, NOW))
+		when(reservationRepository.findAllDueWithLock(
+				ReservationStatus.PENDING,
+				NOW,
+				PaymentStatus.APPROVED))
 				.thenReturn(List.of());
 
 		int expiredCount = expirationService.expireDueReservations();
 
 		assertThat(expiredCount).isZero();
+		verifyNoInteractions(
+				paymentRepository,
+				reservationItemRepository,
+				seatRepository,
+				seatLockService,
+				reservationEventProducer);
+	}
+
+	@Test
+	void shouldSkipReservationApprovedAfterExpirationQueryStarted() {
+		Event event = new Event(
+				"Coldplay - Brasilia",
+				null,
+				"Arena BRB Mane Garrincha",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00"));
+		User user = new User(
+				"Leonardo",
+				"leonardo@example.com",
+				"encoded-password",
+				Role.USER);
+		Reservation reservation = new Reservation(
+				user,
+				event,
+				NOW,
+				new BigDecimal("250.00"));
+		ReflectionTestUtils.setField(reservation, "id", 50L);
+		when(reservationRepository.findAllDueWithLock(
+				ReservationStatus.PENDING,
+				NOW,
+				PaymentStatus.APPROVED))
+				.thenReturn(List.of(reservation));
+		when(paymentRepository.existsByReservationIdAndStatus(
+				50L,
+				PaymentStatus.APPROVED))
+				.thenReturn(true);
+
+		int expiredCount = expirationService.expireDueReservations();
+
+		assertThat(expiredCount).isZero();
+		assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.PENDING);
 		verifyNoInteractions(
 				reservationItemRepository,
 				seatRepository,

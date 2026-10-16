@@ -73,6 +73,13 @@ public class Reservation {
 		status = ReservationStatus.EXPIRED;
 	}
 
+	public void confirm() {
+		if (status != ReservationStatus.PENDING) {
+			throw new IllegalStateException("Only pending reservations can be confirmed");
+		}
+		status = ReservationStatus.CONFIRMED;
+	}
+
 	@PrePersist
 	void assignInitialValues() {
 		if (status == null) {

@@ -21,6 +21,8 @@ import com.leonardo.ticketflow.event.repository.EventRepository;
 import com.leonardo.ticketflow.exception.ResourceNotFoundException;
 import com.leonardo.ticketflow.kafka.event.ReservationCreatedEvent;
 import com.leonardo.ticketflow.kafka.producer.ReservationEventProducer;
+import com.leonardo.ticketflow.payment.entity.PaymentStatus;
+import com.leonardo.ticketflow.payment.repository.PaymentRepository;
 import com.leonardo.ticketflow.reservation.dto.CreateReservationRequest;
 import com.leonardo.ticketflow.reservation.dto.ReservationItemResponse;
 import com.leonardo.ticketflow.reservation.dto.ReservationResponse;
@@ -49,6 +51,7 @@ public class ReservationService {
 	private final SeatRepository seatRepository;
 	private final ReservationRepository reservationRepository;
 	private final ReservationItemRepository reservationItemRepository;
+	private final PaymentRepository paymentRepository;
 	private final RedisSeatLockService seatLockService;
 	private final ReservationEventProducer reservationEventProducer;
 	private final Clock clock;
@@ -59,6 +62,7 @@ public class ReservationService {
 			SeatRepository seatRepository,
 			ReservationRepository reservationRepository,
 			ReservationItemRepository reservationItemRepository,
+			PaymentRepository paymentRepository,
 			RedisSeatLockService seatLockService,
 			ReservationEventProducer reservationEventProducer,
 			Clock clock) {
@@ -67,6 +71,7 @@ public class ReservationService {
 		this.seatRepository = seatRepository;
 		this.reservationRepository = reservationRepository;
 		this.reservationItemRepository = reservationItemRepository;
+		this.paymentRepository = paymentRepository;
 		this.seatLockService = seatLockService;
 		this.reservationEventProducer = reservationEventProducer;
 		this.clock = clock;
@@ -159,6 +164,12 @@ public class ReservationService {
 		if (reservation.getStatus() != ReservationStatus.PENDING) {
 			throw new ReservationNotCancellableException(
 					"Only pending reservations can be cancelled");
+		}
+		if (paymentRepository.existsByReservationIdAndStatus(
+				reservationId,
+				PaymentStatus.APPROVED)) {
+			throw new ReservationNotCancellableException(
+					"Reservation with an approved payment cannot be cancelled");
 		}
 
 		List<ReservationItem> items = reservationItemRepository

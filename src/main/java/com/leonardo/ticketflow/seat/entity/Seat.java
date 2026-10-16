@@ -57,6 +57,13 @@ public class Seat {
 		status = SeatStatus.AVAILABLE;
 	}
 
+	public void sell() {
+		if (status != SeatStatus.RESERVED) {
+			throw new IllegalStateException("Only reserved seats can be sold");
+		}
+		status = SeatStatus.SOLD;
+	}
+
 	@PrePersist
 	void assignInitialStatus() {
 		if (status == null) {

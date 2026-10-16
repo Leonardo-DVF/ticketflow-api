@@ -382,4 +382,39 @@ class PersistenceIntegrationTest {
 		assertThatThrownBy(() -> paymentRepository.saveAndFlush(duplicatedApproval))
 				.isInstanceOf(DataIntegrityViolationException.class);
 	}
+
+	@Test
+	void shouldNotSelectExpiredReservationAfterPaymentApproval() {
+		User user = userRepository.saveAndFlush(new User(
+				"Leonardo",
+				"paid-expiration@example.com",
+				"encoded-password",
+				Role.USER));
+		Event event = eventRepository.saveAndFlush(new Event(
+				"Coldplay - Brasilia",
+				null,
+				"Arena BRB Mane Garrincha",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00")));
+		Instant expiresAt = Instant.now().plusSeconds(600);
+		Reservation unpaidReservation = reservationRepository.saveAndFlush(new Reservation(
+				user,
+				event,
+				expiresAt,
+				new BigDecimal("250.00")));
+		Reservation paidReservation = reservationRepository.saveAndFlush(new Reservation(
+				user,
+				event,
+				expiresAt,
+				new BigDecimal("250.00")));
+		Payment payment = new Payment(paidReservation, new BigDecimal("250.00"));
+		payment.approve();
+		paymentRepository.saveAndFlush(payment);
+
+		assertThat(reservationRepository.findAllDueWithLock(
+				ReservationStatus.PENDING,
+				expiresAt.plusSeconds(1),
+				PaymentStatus.APPROVED))
+				.extracting(Reservation::getId)
+				.containsExactly(unpaidReservation.getId());
+	}
 }
