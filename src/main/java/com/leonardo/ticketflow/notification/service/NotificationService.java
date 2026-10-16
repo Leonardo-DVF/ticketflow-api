@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.leonardo.ticketflow.kafka.event.PaymentApprovedEvent;
+import com.leonardo.ticketflow.kafka.event.PaymentRejectedEvent;
 
 @Service
 public class NotificationService {
@@ -14,6 +15,14 @@ public class NotificationService {
 	public void sendPaymentApproved(PaymentApprovedEvent event) {
 		LOGGER.info(
 				"Notification sent to user {} for approved payment {} and reservation {}.",
+				event.userId(),
+				event.paymentId(),
+				event.reservationId());
+	}
+
+	public void sendPaymentRejected(PaymentRejectedEvent event) {
+		LOGGER.info(
+				"Notification sent to user {} for rejected payment {} and reservation {}.",
 				event.userId(),
 				event.paymentId(),
 				event.reservationId());
