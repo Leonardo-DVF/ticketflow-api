@@ -18,6 +18,8 @@ import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.repository.EventRepository;
 import com.leonardo.ticketflow.exception.ResourceNotFoundException;
+import com.leonardo.ticketflow.kafka.event.ReservationCreatedEvent;
+import com.leonardo.ticketflow.kafka.producer.ReservationEventProducer;
 import com.leonardo.ticketflow.reservation.dto.CreateReservationRequest;
 import com.leonardo.ticketflow.reservation.dto.ReservationItemResponse;
 import com.leonardo.ticketflow.reservation.dto.ReservationResponse;
@@ -47,6 +49,7 @@ public class ReservationService {
 	private final ReservationRepository reservationRepository;
 	private final ReservationItemRepository reservationItemRepository;
 	private final RedisSeatLockService seatLockService;
+	private final ReservationEventProducer reservationEventProducer;
 	private final Clock clock;
 
 	public ReservationService(
@@ -56,6 +59,7 @@ public class ReservationService {
 			ReservationRepository reservationRepository,
 			ReservationItemRepository reservationItemRepository,
 			RedisSeatLockService seatLockService,
+			ReservationEventProducer reservationEventProducer,
 			Clock clock) {
 		this.userRepository = userRepository;
 		this.eventRepository = eventRepository;
@@ -63,6 +67,7 @@ public class ReservationService {
 		this.reservationRepository = reservationRepository;
 		this.reservationItemRepository = reservationItemRepository;
 		this.seatLockService = seatLockService;
+		this.reservationEventProducer = reservationEventProducer;
 		this.clock = clock;
 	}
 
@@ -110,6 +115,15 @@ public class ReservationService {
 		}
 		reservationItemRepository.saveAll(items);
 		transferLocks(eventId, reservation.getId(), lockOwners);
+		ReservationCreatedEvent createdEvent = new ReservationCreatedEvent(
+				reservation.getId(),
+				user.getId(),
+				event.getId(),
+				seatIds,
+				totalAmount,
+				expiresAt,
+				clock.instant());
+		TransactionActions.afterCommit(() -> reservationEventProducer.publish(createdEvent));
 
 		return toResponse(reservation, items);
 	}

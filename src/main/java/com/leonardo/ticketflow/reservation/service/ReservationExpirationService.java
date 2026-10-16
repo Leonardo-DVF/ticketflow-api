@@ -6,6 +6,8 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.leonardo.ticketflow.kafka.event.ReservationExpiredEvent;
+import com.leonardo.ticketflow.kafka.producer.ReservationEventProducer;
 import com.leonardo.ticketflow.reservation.entity.Reservation;
 import com.leonardo.ticketflow.reservation.entity.ReservationItem;
 import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
@@ -22,6 +24,7 @@ public class ReservationExpirationService {
 	private final ReservationItemRepository reservationItemRepository;
 	private final SeatRepository seatRepository;
 	private final RedisSeatLockService seatLockService;
+	private final ReservationEventProducer reservationEventProducer;
 	private final Clock clock;
 
 	public ReservationExpirationService(
@@ -29,11 +32,13 @@ public class ReservationExpirationService {
 			ReservationItemRepository reservationItemRepository,
 			SeatRepository seatRepository,
 			RedisSeatLockService seatLockService,
+			ReservationEventProducer reservationEventProducer,
 			Clock clock) {
 		this.reservationRepository = reservationRepository;
 		this.reservationItemRepository = reservationItemRepository;
 		this.seatRepository = seatRepository;
 		this.seatLockService = seatLockService;
+		this.reservationEventProducer = reservationEventProducer;
 		this.clock = clock;
 	}
 
@@ -55,8 +60,15 @@ public class ReservationExpirationService {
 			reservation.expire();
 			Long eventId = reservation.getEvent().getId();
 			String lockOwner = "reservation:" + reservation.getId();
+			ReservationExpiredEvent expiredEvent = new ReservationExpiredEvent(
+					reservation.getId(),
+					reservation.getUser().getId(),
+					eventId,
+					seatIds,
+					clock.instant());
 			TransactionActions.afterCommit(() -> seatIds.forEach(
 					seatId -> releaseLockQuietly(eventId, seatId, lockOwner)));
+			TransactionActions.afterCommit(() -> reservationEventProducer.publish(expiredEvent));
 		}
 
 		return reservations.size();

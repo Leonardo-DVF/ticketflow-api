@@ -22,11 +22,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.repository.EventRepository;
+import com.leonardo.ticketflow.kafka.event.ReservationCreatedEvent;
+import com.leonardo.ticketflow.kafka.producer.ReservationEventProducer;
 import com.leonardo.ticketflow.reservation.dto.CreateReservationRequest;
 import com.leonardo.ticketflow.reservation.dto.ReservationResponse;
 import com.leonardo.ticketflow.reservation.entity.Reservation;
@@ -69,6 +72,9 @@ class ReservationServiceTest {
 	@Mock
 	private RedisSeatLockService seatLockService;
 
+	@Mock
+	private ReservationEventProducer reservationEventProducer;
+
 	private ReservationService reservationService;
 
 	@BeforeEach
@@ -80,6 +86,7 @@ class ReservationServiceTest {
 				reservationRepository,
 				reservationItemRepository,
 				seatLockService,
+				reservationEventProducer,
 				Clock.fixed(NOW, ZoneOffset.UTC));
 	}
 
@@ -125,6 +132,17 @@ class ReservationServiceTest {
 		assertThat(response.items()).extracting(item -> item.seatCode())
 				.containsExactly("A1", "A2");
 		verify(seatRepository).findAllByIdWithLock(List.of(100L, 101L));
+		ArgumentCaptor<ReservationCreatedEvent> eventCaptor = ArgumentCaptor.forClass(
+				ReservationCreatedEvent.class);
+		verify(reservationEventProducer).publish(eventCaptor.capture());
+		assertThat(eventCaptor.getValue()).isEqualTo(new ReservationCreatedEvent(
+				50L,
+				1L,
+				10L,
+				List.of(100L, 101L),
+				new BigDecimal("500.00"),
+				NOW.plusSeconds(600),
+				NOW));
 	}
 
 	@Test
@@ -187,7 +205,8 @@ class ReservationServiceTest {
 				seatRepository,
 				reservationRepository,
 				reservationItemRepository,
-				seatLockService);
+				seatLockService,
+				reservationEventProducer);
 	}
 
 	@Test

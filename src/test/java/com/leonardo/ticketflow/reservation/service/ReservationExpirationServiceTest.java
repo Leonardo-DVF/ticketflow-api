@@ -21,6 +21,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.leonardo.ticketflow.event.entity.Event;
+import com.leonardo.ticketflow.kafka.event.ReservationExpiredEvent;
+import com.leonardo.ticketflow.kafka.producer.ReservationEventProducer;
 import com.leonardo.ticketflow.reservation.entity.Reservation;
 import com.leonardo.ticketflow.reservation.entity.ReservationItem;
 import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
@@ -51,6 +53,9 @@ class ReservationExpirationServiceTest {
 	@Mock
 	private RedisSeatLockService seatLockService;
 
+	@Mock
+	private ReservationEventProducer reservationEventProducer;
+
 	private ReservationExpirationService expirationService;
 
 	@BeforeEach
@@ -60,6 +65,7 @@ class ReservationExpirationServiceTest {
 				reservationItemRepository,
 				seatRepository,
 				seatLockService,
+				reservationEventProducer,
 				Clock.fixed(NOW, ZoneOffset.UTC));
 	}
 
@@ -80,6 +86,7 @@ class ReservationExpirationServiceTest {
 				"leonardo@example.com",
 				"encoded-password",
 				Role.USER);
+		ReflectionTestUtils.setField(user, "id", 1L);
 		Reservation reservation = new Reservation(
 				user,
 				event,
@@ -106,6 +113,12 @@ class ReservationExpirationServiceTest {
 		assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.EXPIRED);
 		assertThat(seat.getStatus()).isEqualTo(SeatStatus.AVAILABLE);
 		verify(seatLockService).release(10L, 100L, "reservation:50");
+		verify(reservationEventProducer).publish(new ReservationExpiredEvent(
+				50L,
+				1L,
+				10L,
+				List.of(100L),
+				NOW));
 	}
 
 	@Test
@@ -116,6 +129,10 @@ class ReservationExpirationServiceTest {
 		int expiredCount = expirationService.expireDueReservations();
 
 		assertThat(expiredCount).isZero();
-		verifyNoInteractions(reservationItemRepository, seatRepository, seatLockService);
+		verifyNoInteractions(
+				reservationItemRepository,
+				seatRepository,
+				seatLockService,
+				reservationEventProducer);
 	}
 }
