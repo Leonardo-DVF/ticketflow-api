@@ -19,6 +19,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import com.leonardo.ticketflow.audit.entity.AuditEventType;
+import com.leonardo.ticketflow.audit.entity.AuditLog;
+import com.leonardo.ticketflow.audit.repository.AuditLogRepository;
 import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.repository.EventRepository;
@@ -79,6 +82,9 @@ class PersistenceIntegrationTest {
 
 	@Autowired
 	private TicketRepository ticketRepository;
+
+	@Autowired
+	private AuditLogRepository auditLogRepository;
 
 	@Autowired
 	private EntityManager entityManager;
@@ -471,6 +477,36 @@ class PersistenceIntegrationTest {
 				.isEmpty();
 		assertThatThrownBy(() -> ticketRepository.saveAndFlush(
 				new Ticket(reservation, seat)))
+				.isInstanceOf(DataIntegrityViolationException.class);
+	}
+
+	@Test
+	void shouldPersistAuditEventOnlyOnce() {
+		Instant occurredAt = Instant.parse("2026-10-16T15:00:00Z");
+		AuditLog auditLog = auditLogRepository.saveAndFlush(new AuditLog(
+				AuditEventType.PAYMENT_APPROVED,
+				80L,
+				50L,
+				1L,
+				10L,
+				new BigDecimal("250.00"),
+				occurredAt));
+
+		assertThat(auditLog.getId()).isNotNull();
+		assertThat(auditLog.getCreatedAt()).isNotNull();
+		assertThat(auditLog.getOccurredAt()).isEqualTo(occurredAt);
+		assertThat(auditLogRepository.existsByEventTypeAndAggregateId(
+				AuditEventType.PAYMENT_APPROVED,
+				80L))
+				.isTrue();
+		assertThatThrownBy(() -> auditLogRepository.saveAndFlush(new AuditLog(
+				AuditEventType.PAYMENT_APPROVED,
+				80L,
+				50L,
+				1L,
+				10L,
+				new BigDecimal("250.00"),
+				occurredAt)))
 				.isInstanceOf(DataIntegrityViolationException.class);
 	}
 }
