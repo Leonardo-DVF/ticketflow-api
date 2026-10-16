@@ -22,6 +22,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import com.leonardo.ticketflow.event.entity.Event;
 import com.leonardo.ticketflow.event.entity.EventStatus;
 import com.leonardo.ticketflow.event.repository.EventRepository;
+import com.leonardo.ticketflow.payment.entity.Payment;
+import com.leonardo.ticketflow.payment.entity.PaymentStatus;
+import com.leonardo.ticketflow.payment.repository.PaymentRepository;
 import com.leonardo.ticketflow.reservation.entity.Reservation;
 import com.leonardo.ticketflow.reservation.entity.ReservationItem;
 import com.leonardo.ticketflow.reservation.entity.ReservationStatus;
@@ -68,6 +71,9 @@ class PersistenceIntegrationTest {
 
 	@Autowired
 	private ReservationItemRepository reservationItemRepository;
+
+	@Autowired
+	private PaymentRepository paymentRepository;
 
 	@Autowired
 	private EntityManager entityManager;
@@ -320,6 +326,60 @@ class PersistenceIntegrationTest {
 
 		assertThatThrownBy(() -> reservationItemRepository.saveAndFlush(
 				new ReservationItem(reservation, seat, new BigDecimal("250.00"))))
+				.isInstanceOf(DataIntegrityViolationException.class);
+	}
+
+	@Test
+	void shouldApplyPaymentsTableMigration() {
+		Integer tableCount = jdbcClient.sql("""
+				SELECT COUNT(*)
+				FROM information_schema.tables
+				WHERE table_schema = 'public'
+				  AND table_name = 'payments'
+				""")
+				.query(Integer.class)
+				.single();
+
+		assertThat(tableCount).isEqualTo(1);
+	}
+
+	@Test
+	void shouldPersistRejectedRetryAndOnlyOneApprovedPayment() {
+		User user = userRepository.saveAndFlush(new User(
+				"Leonardo",
+				"payment@example.com",
+				"encoded-password",
+				Role.USER));
+		Event event = eventRepository.saveAndFlush(new Event(
+				"Coldplay - Brasilia",
+				null,
+				"Arena BRB Mane Garrincha",
+				OffsetDateTime.parse("2026-12-20T20:00:00-03:00")));
+		Reservation reservation = reservationRepository.saveAndFlush(new Reservation(
+				user,
+				event,
+				Instant.now().plusSeconds(600),
+				new BigDecimal("250.00")));
+		Payment rejected = new Payment(reservation, new BigDecimal("250.00"));
+		rejected.reject();
+		paymentRepository.saveAndFlush(rejected);
+		Payment approved = new Payment(reservation, new BigDecimal("250.00"));
+		approved.approve();
+		paymentRepository.saveAndFlush(approved);
+
+		assertThat(paymentRepository.findAll())
+				.extracting(Payment::getStatus)
+				.containsExactlyInAnyOrder(PaymentStatus.REJECTED, PaymentStatus.APPROVED);
+		assertThat(paymentRepository.existsByReservationIdAndStatus(
+				reservation.getId(),
+				PaymentStatus.APPROVED))
+				.isTrue();
+
+		Payment duplicatedApproval = new Payment(
+				reservation,
+				new BigDecimal("250.00"));
+		duplicatedApproval.approve();
+		assertThatThrownBy(() -> paymentRepository.saveAndFlush(duplicatedApproval))
 				.isInstanceOf(DataIntegrityViolationException.class);
 	}
 }
