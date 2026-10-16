@@ -457,6 +457,18 @@ class PersistenceIntegrationTest {
 				.extracting(Ticket::getSeat)
 				.extracting(Seat::getId)
 				.containsExactly(seat.getId());
+		assertThat(ticketRepository.findAllByUserEmailIgnoreCaseOrderByCreatedAtDesc(
+				"TICKET@EXAMPLE.COM"))
+				.extracting(Ticket::getId)
+				.containsExactly(ticket.getId());
+		assertThat(ticketRepository.findByIdAndUserEmailIgnoreCase(
+				ticket.getId(),
+				"ticket@example.com"))
+				.isPresent();
+		assertThat(ticketRepository.findByIdAndUserEmailIgnoreCase(
+				ticket.getId(),
+				"another@example.com"))
+				.isEmpty();
 		assertThatThrownBy(() -> ticketRepository.saveAndFlush(
 				new Ticket(reservation, seat)))
 				.isInstanceOf(DataIntegrityViolationException.class);
