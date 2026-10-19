@@ -60,6 +60,14 @@ class JwtAuthenticationTest {
 				.andExpect(jsonPath("$.message").value("Authentication is required"));
 	}
 
+	@Test
+	void shouldAllowSwaggerRoutesWithoutAuthentication() throws Exception {
+		mockMvc.perform(get("/swagger-ui.html"))
+				.andExpect(status().isNotFound());
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isNotFound());
+	}
+
 	private String createToken(String subject, String role, String issuer) {
 		Instant issuedAt = Instant.now();
 		JwtClaimsSet claims = JwtClaimsSet.builder()

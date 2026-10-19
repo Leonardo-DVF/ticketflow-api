@@ -32,6 +32,10 @@ spring:
       properties:
         spring.json.trusted.packages: com.leonardo.ticketflow.kafka.event
 
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
 security:
   jwt:
     secret: ${JWT_SECRET}

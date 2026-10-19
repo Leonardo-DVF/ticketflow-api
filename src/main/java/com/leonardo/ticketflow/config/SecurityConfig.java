@@ -46,6 +46,7 @@ public class SecurityConfig {
 				.authorizeHttpRequests(authorize -> authorize
 						.requestMatchers(HttpMethod.POST, "/auth/register").permitAll()
 						.requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
+						.requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
 						.requestMatchers(HttpMethod.GET, "/events", "/events/*").permitAll()
 						.requestMatchers(HttpMethod.GET, "/events/*/seats", "/events/*/seats/available").permitAll()
 						.requestMatchers(HttpMethod.POST, "/events").hasRole("ADMIN")
