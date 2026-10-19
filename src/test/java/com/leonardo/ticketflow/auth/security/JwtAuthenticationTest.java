@@ -68,6 +68,14 @@ class JwtAuthenticationTest {
 				.andExpect(status().isNotFound());
 	}
 
+	@Test
+	void shouldAllowHealthRoutesWithoutAuthentication() throws Exception {
+		mockMvc.perform(get("/actuator/health"))
+				.andExpect(status().isNotFound());
+		mockMvc.perform(get("/actuator/health/readiness"))
+				.andExpect(status().isNotFound());
+	}
+
 	private String createToken(String subject, String role, String issuer) {
 		Instant issuedAt = Instant.now();
 		JwtClaimsSet claims = JwtClaimsSet.builder()

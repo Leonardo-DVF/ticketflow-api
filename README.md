@@ -144,6 +144,9 @@ Useful URLs:
 - API: `http://localhost:8080`
 - Swagger UI: `http://localhost:8080/swagger-ui.html`
 - OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+- Health: `http://localhost:8080/actuator/health`
+
+Only health endpoints are exposed by Actuator. Docker Compose uses this endpoint to report the application container as healthy after its dependencies are available.
 
 To stop the environment without deleting database data:
 
