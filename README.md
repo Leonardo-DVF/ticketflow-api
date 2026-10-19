@@ -1,87 +1,265 @@
 # TicketFlow
 
-TicketFlow is a REST API for event management, temporary seat reservations, simulated payments, and ticket issuing. The project is being built incrementally to explore concurrency control and event-driven architecture with Java and Spring Boot.
+TicketFlow is a REST API for event ticketing. It manages events, sectors, seats, time-limited reservations, simulated payments, and ticket issuance.
 
-## Project status
+The project is a learning-focused backend portfolio piece built as a modular monolith. Its main goal is to demonstrate real business rules beyond CRUD: preventing double booking under concurrent requests, expiring reservations safely, and reacting asynchronously to payment events with Apache Kafka.
 
-The project is in its initial setup stage. Business features and infrastructure will be introduced in small, testable increments so that each technology solves a concrete problem.
+## The problem
 
-## Planned features
+Ticket sales have a critical consistency requirement: two people must never buy the same seat. A simple “check if available, then reserve” approach is unsafe because two simultaneous requests can both read the same available seat before either one writes a change.
 
-- User registration and JWT authentication
-- Event, sector, and seat management
-- Temporary seat reservations
-- Concurrency control to prevent double booking
-- Simulated payment approval and rejection
-- Asynchronous ticket, notification, and audit processing
-- Reservation expiration
+TicketFlow combines PostgreSQL row locks, Redis locks with TTL, and transactional state changes to ensure that only one reservation can win. A successful payment is then handled asynchronously so ticket issuance, notification, and audit work can evolve independently.
 
-## Technology roadmap
+## Architecture
 
-- Java 21 and Spring Boot
-- PostgreSQL and Flyway for persistence and database migrations
-- Redis for temporary seat locks
-- Apache Kafka for asynchronous domain events
-- Spring Security and JWT for authentication and authorization
-- JUnit, Mockito, and Testcontainers for automated tests
-- Docker and Docker Compose for a reproducible environment
-- OpenAPI/Swagger for API documentation
+The application is a modular monolith: modules are separated by business responsibility but deployed as one Spring Boot application. This keeps the system approachable while preserving natural boundaries for a future service extraction.
 
-## Running the project
-
-Requirements:
-
-- Java 21
-- Docker and Docker Compose
-
-Start PostgreSQL:
-
-```powershell
-docker compose up -d postgres
+```text
+                         +----------------------+
+                         |    Spring Boot API   |
+                         |  auth / events /     |
+                         |  reservation /       |
+                         |  payment / ticket    |
+                         +----------+-----------+
+                                    |
+              +---------------------+---------------------+
+              |                     |                     |
+       PostgreSQL                 Redis                 Kafka
+   durable business data     temporary seat locks    domain events
+              |                                           |
+              |                                 +---------+---------+
+              |                                 |         |         |
+              |                              Ticket  Notification  Audit
+              |                              consumer  consumer   consumer
 ```
 
-The local database uses `ticketflow` as its database name, username, and password. The application provides matching development defaults. For another environment, use the `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` environment variables documented in `.env.example`.
+## Main flow
 
-Set a JWT signing secret containing at least 32 characters before starting the application:
+```text
+User selects seats
+        |
+        v
+POST /reservations
+        |
+        +--> Redis temporarily locks each seat (10-minute TTL)
+        +--> PostgreSQL locks the corresponding rows and records the reservation
+        +--> seats become RESERVED
+        |
+        v
+POST /payments/{reservationId}/approve
+        |
+        v
+payment-approved topic
+        |
+        +--> Ticket consumer: confirms reservation, marks seats SOLD, creates tickets
+        +--> Notification consumer: records a simulated notification
+        +--> Audit consumer: persists an audit log
+```
+
+## Concurrency and temporary locks
+
+PostgreSQL is the source of truth for seat and reservation state. While a reservation is created, the application fetches seat rows using pessimistic locking in a deterministic order. That serializes conflicting database writes and prevents a seat from being sold twice.
+
+Redis adds a fast, short-lived distributed lock before the database work. Each key follows this format:
+
+```text
+seat:lock:{eventId}:{seatId}
+```
+
+The lock is acquired atomically with `SET IF ABSENT` and has a 10-minute TTL. It is transferred to the reservation after persistence, then released after cancellation, expiration, or confirmation. Owner-checked Lua scripts ensure that one reservation cannot remove another reservation’s lock. The TTL is a final safety net if cleanup cannot reach Redis.
+
+When a reservation expires, a scheduled job releases its seats, marks the reservation as `EXPIRED`, removes the related Redis locks, and publishes `reservation-expired`.
+
+## Why Kafka?
+
+Kafka is used where one business event needs independent reactions. When payment approval occurs, the payment module publishes a `PaymentApprovedEvent` to `payment-approved`; it does not need direct knowledge of tickets, notifications, or audit records.
+
+```text
+Payment service -> payment-approved -> ticket consumer
+                                  -> notification consumer
+                                  -> audit consumer
+```
+
+- A **producer** publishes an event, such as `PaymentApprovedEvent`.
+- A **topic** is the named event stream, such as `payment-approved`.
+- A **consumer** reads events and performs one responsibility.
+- A **consumer group** lets every responsibility receive the event once, while allowing multiple instances of the same responsibility to share processing work.
+- An **offset** is Kafka’s position marker for a consumer group, so it can resume from the next event after a restart.
+
+Events are separate DTO records rather than JPA entities. This avoids coupling the message contract to persistence mappings.
+
+Currently configured topics:
+
+| Topic | Event | Producer |
+| --- | --- | --- |
+| `reservation-created` | `ReservationCreatedEvent` | Reservation service |
+| `reservation-expired` | `ReservationExpiredEvent` | Expiration service |
+| `payment-approved` | `PaymentApprovedEvent` | Payment service |
+| `payment-rejected` | `PaymentRejectedEvent` | Payment service |
+| `ticket-issued` | `TicketIssuedEvent` | Ticket confirmation flow |
+
+## Technology
+
+- Java 21, Spring Boot, Spring Web MVC
+- Spring Data JPA, PostgreSQL, Flyway
+- Spring Security with JWT
+- Apache Kafka and Spring for Apache Kafka
+- Redis for temporary seat locks
+- Bean Validation and global API error handling
+- OpenAPI / Swagger UI
+- JUnit, Mockito, and Testcontainers
+- Docker and Docker Compose
+
+## Running with Docker
+
+Requirements: Docker Desktop and Docker Compose.
+
+1. Create a local environment file:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+2. Replace `JWT_SECRET` in `.env` with a random value containing at least 32 characters.
+
+3. Start the complete environment:
+
+   ```powershell
+   docker compose up -d --build
+   ```
+
+The API waits for PostgreSQL, Redis, and Kafka health checks. Flyway applies pending migrations on startup and Hibernate validates the schema; it never creates the schema automatically.
+
+Useful URLs:
+
+- API: `http://localhost:8080`
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+- OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+
+To stop the environment without deleting database data:
+
+```powershell
+docker compose down
+```
+
+## Running locally
+
+Start the infrastructure first:
+
+```powershell
+docker compose up -d postgres redis kafka
+```
+
+Set the JWT secret and start the application:
 
 ```powershell
 $env:JWT_SECRET = "replace-with-a-random-secret-containing-at-least-32-characters"
-```
-
-Flyway applies pending migrations automatically when the application starts. Hibernate is configured with `ddl-auto=validate`, so database changes must be introduced explicitly through migration files.
-
-Start the application:
-
-On Windows:
-
-```powershell
 .\mvnw.cmd spring-boot:run
 ```
 
-On Linux or macOS:
+On Linux or macOS, use `./mvnw spring-boot:run`.
 
-```bash
-./mvnw spring-boot:run
+Local defaults and all configurable variables are documented in `.env.example`. In Docker, the application uses internal service addresses (`postgres`, `redis`, and `kafka:19092`); on the host it uses `localhost`.
+
+## API overview
+
+Public endpoints:
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `POST` | `/auth/register` | Register a user |
+| `POST` | `/auth/login` | Authenticate and obtain a JWT |
+| `GET` | `/events` | List available events |
+| `GET` | `/events/{id}` | Get an available event |
+| `GET` | `/events/{eventId}/seats` | List event seats |
+| `GET` | `/events/{eventId}/seats/available` | List available event seats |
+
+Authenticated-user endpoints require `Authorization: Bearer <token>`:
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `POST` | `/reservations` | Create a temporary reservation |
+| `GET` | `/reservations/{id}` | Get an owned reservation |
+| `GET` | `/reservations/my` | List the caller’s reservations |
+| `DELETE` | `/reservations/{id}` | Cancel a pending reservation |
+| `POST` | `/payments/{reservationId}/approve` | Simulate payment approval |
+| `POST` | `/payments/{reservationId}/reject` | Simulate payment rejection |
+| `GET` | `/tickets/my` | List the caller’s tickets |
+| `GET` | `/tickets/{id}` | Get an owned ticket |
+
+Administrative endpoints require the `ADMIN` role:
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `POST` | `/events` | Create an event |
+| `PUT` | `/events/{id}` | Update an event |
+| `DELETE` | `/events/{id}` | Cancel an event |
+| `POST` | `/events/{eventId}/sectors` | Create a sector |
+| `GET` | `/events/{eventId}/sectors` | List sectors |
+| `POST` | `/sectors/{sectorId}/seats` | Create a seat |
+
+New registrations receive the `USER` role. For local development, promote a registered user to `ADMIN` directly in PostgreSQL:
+
+```sql
+UPDATE users SET role = 'ADMIN' WHERE email = 'admin@example.com';
 ```
 
-## Running the tests
+## Example reservation request
 
-The integration test starts an isolated PostgreSQL container and verifies that the Flyway migrations were applied. Docker must be running.
+```http
+POST /reservations
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "eventId": 10,
+  "seatIds": [100, 101]
+}
+```
+
+Seats must be unique, belong to the selected available event, and be in `AVAILABLE` status. A conflicting reservation returns a `409 Conflict` response using the standard API error format:
+
+```json
+{
+  "timestamp": "2026-10-19T12:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Seat A10 is already reserved",
+  "path": "/reservations"
+}
+```
+
+## Tests
+
+Run the test suite with Docker running:
 
 ```powershell
 .\mvnw.cmd test
 ```
 
-## Architecture
+The suite covers service rules, controllers, Kafka serialization and consumers, Flyway persistence, Redis locking, and end-to-end payment processing. Testcontainers is used for integration tests with real PostgreSQL and Kafka infrastructure. A dedicated concurrency integration test issues simultaneous reservation attempts for the same seat and verifies that exactly one succeeds.
 
-TicketFlow will start as a modular monolith. Modules will remain separated by business responsibility while sharing the same deployable application. This keeps the learning path approachable and leaves room for future service extraction where it provides real value.
+## Project structure
 
-## Learning goals
+```text
+src/main/java/com/leonardo/ticketflow
+├── auth            authentication and JWT
+├── event           events
+├── sector          event sectors and pricing
+├── seat            seats and availability
+├── reservation     reservation, expiration, locks
+├── payment         simulated payments
+├── ticket          ticket generation and queries
+├── notification    simulated notifications
+├── audit           audit log persistence
+├── kafka           topics, producers, consumers, event DTOs
+├── config          application configuration
+└── exception       standardized API error handling
+```
 
-The project aims to demonstrate backend concepts beyond basic CRUD, especially:
+## Next improvements
 
-- preventing two users from reserving the same seat;
-- managing temporary reservations with expiration;
-- publishing domain events without exposing JPA entities;
-- allowing independent Kafka consumers to react to the same business event;
-- testing integrations against real infrastructure with Testcontainers.
+- Add idempotent consumption and a transactional outbox for stronger delivery guarantees.
+- Add operational health checks and metrics.
+- Add role management or an explicit administrator bootstrap flow.
+- Evolve selected modules into separate services only when operational needs justify it.
