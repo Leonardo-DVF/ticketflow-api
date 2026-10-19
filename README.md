@@ -122,6 +122,15 @@ Requirements: Docker Desktop and Docker Compose.
 
 2. Replace `JWT_SECRET` in `.env` with a random value containing at least 32 characters.
 
+   To start with an administrator for local development, also set the following values. The bootstrap is disabled by default and should not use a shared or production password.
+
+   ```text
+   ADMIN_BOOTSTRAP_ENABLED=true
+   ADMIN_BOOTSTRAP_NAME=TicketFlow Admin
+   ADMIN_BOOTSTRAP_EMAIL=admin@example.com
+   ADMIN_BOOTSTRAP_PASSWORD=a-strong-local-password
+   ```
+
 3. Start the complete environment:
 
    ```powershell
@@ -198,11 +207,9 @@ Administrative endpoints require the `ADMIN` role:
 | `GET` | `/events/{eventId}/sectors` | List sectors |
 | `POST` | `/sectors/{sectorId}/seats` | Create a seat |
 
-New registrations receive the `USER` role. For local development, promote a registered user to `ADMIN` directly in PostgreSQL:
+New registrations receive the `USER` role. To bootstrap an administrator in local development, set the `ADMIN_BOOTSTRAP_*` variables shown above before starting the application. When enabled, the bootstrap creates the configured administrator or promotes an existing user with that email; it does not overwrite an existing password.
 
-```sql
-UPDATE users SET role = 'ADMIN' WHERE email = 'admin@example.com';
-```
+The bootstrap is disabled by default. Never commit its password or enable it in an untrusted environment.
 
 ## Example reservation request
 
@@ -261,5 +268,4 @@ src/main/java/com/leonardo/ticketflow
 
 - Add idempotent consumption and a transactional outbox for stronger delivery guarantees.
 - Add operational health checks and metrics.
-- Add role management or an explicit administrator bootstrap flow.
 - Evolve selected modules into separate services only when operational needs justify it.

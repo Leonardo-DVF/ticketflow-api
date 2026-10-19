@@ -15,6 +15,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in the environment or .env file}
       JWT_ISSUER: ${JWT_ISSUER:-https://ticketflow.local}
       JWT_EXPIRATION_SECONDS: ${JWT_EXPIRATION_SECONDS:-3600}
+      ADMIN_BOOTSTRAP_ENABLED: ${ADMIN_BOOTSTRAP_ENABLED:-false}
+      ADMIN_BOOTSTRAP_NAME: ${ADMIN_BOOTSTRAP_NAME:-}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -43,6 +43,13 @@ security:
     expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
 
 ticketflow:
+
+  admin-bootstrap:
+    enabled: ${ADMIN_BOOTSTRAP_ENABLED:false}
+    name: ${ADMIN_BOOTSTRAP_NAME:}
+    email: ${ADMIN_BOOTSTRAP_EMAIL:}
+    password: ${ADMIN_BOOTSTRAP_PASSWORD:}
+
   reservation:
     expiration-interval-ms: ${RESERVATION_EXPIRATION_INTERVAL_MS:60000}
     lock:
